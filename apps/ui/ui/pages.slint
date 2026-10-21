@@ -131,8 +131,9 @@ export component HomePage inherits Page {
             vertical-stretch: 1;
         }
 
-        // Yontem ve DNS ana ekrandan degisir: satir yerinde menu acar, secim hemen uygulanir.
-        // Saglayici, DNS kipi ve diger ayrintilar Ayarlar'da kalir.
+        // Saglayici, yontem ve DNS ana ekrandan degisir: satir yerinde menu acar, secim hemen
+        // uygulanir (saglayici secmek onun onerdigi yontemi de secer). DNS kipi ve diger
+        // ayrintilar Ayarlar'da kalir.
         HorizontalLayout {
             padding-left: Metrics.margin;
             padding-right: Metrics.margin;
@@ -140,6 +141,19 @@ export component HomePage inherits Page {
             Group {
                 MenuRow {
                     first: true;
+                    icon: Icons.line-antenna;
+                    filled: false;
+                    tint: Theme.green;
+                    title: @tr("İnternet sağlayıcı");
+                    value: AppState.isp-names[AppState.isp-index];
+                    options: AppState.isps;
+                    current-index: AppState.isp-index;
+                    selected(index) => {
+                        AppState.select-isp(index);
+                    }
+                }
+
+                MenuRow {
                     icon: Icons.fill-bolt;
                     tint: Theme.orange;
                     title: @tr("Yöntem");
@@ -1080,7 +1094,7 @@ export component AboutPage inherits SubPage {
             value: "GitHub";
             link: true;
             clicked => {
-                AppState.open-url("https://github.com/unsalable/dpi-ui-hakan");
+                AppState.open-url("https://github.com/unsalable/hakan-dpi-ui");
             }
         }
     }

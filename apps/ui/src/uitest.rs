@@ -306,7 +306,7 @@ mod tests {
 
         // Ana ekrandaki Yontem/DNS satirlari sayfa degistirmez (yerinde menu acar; menuyu disari
         // tiklayarak kapatinca ana ekranda kalinir).
-        for y in [554.0, 598.0] {
+        for y in [510.0, 554.0, 598.0] {
             h.click(200.0, y);
             h.advance(500);
             assert_eq!(h.app.get_depth(), 0, "satir y={y} sayfa acmamali");
@@ -316,12 +316,15 @@ mod tests {
         }
     }
 
-    /// Ana ekranda Yontem ve DNS iki dokunusla degisir: satira dokun, menuden sec. Menu satirin
-    /// ustunde acilir, secince kapanir; disari dokunmak secmeden kapatir.
+    /// Ana ekranda saglayici, Yontem ve DNS iki dokunusla degisir: satira dokun, menuden sec. Menu
+    /// satirin ustunde acilir, secince kapanir; disari dokunmak secmeden kapatir.
     #[test]
     fn home_menus_pick_in_place() {
         let mut h = Harness::new(1.0);
         gallery::sample(&h, EngineState::On);
+        let isp = Rc::new(Cell::new(-1));
+        let p = isp.clone();
+        h.state().on_select_isp(move |i| p.set(i));
         let method = Rc::new(Cell::new(-1));
         let m = method.clone();
         h.state().on_select_method(move |i| m.set(i));
@@ -330,6 +333,16 @@ mod tests {
         h.state().on_select_quick_dns(move |i| d.set(i));
         let (toggles, f) = counter();
         h.state().on_power_toggle(f);
+
+        // Saglayici: en ustteki satir (y 488-532); 9 saglayici, menu tamami gorunur.
+        let rows = h.state().get_isps().row_count() as f32;
+        let top = 488.0 - 4.0 - (rows * 34.0 + 10.0);
+        h.click(200.0, 510.0);
+        h.advance(400);
+        h.click(250.0, top + 5.0 + 34.0 + 17.0);
+        assert_eq!(isp.get(), 1, "ikinci saglayici (Turk Telekom) secilmeli");
+        assert_eq!(h.page(), (0, 0));
+        h.advance(400);
 
         // Yontem: 16 hazir yontem, menu en fazla 400 px; secili (ilk) oge en ustte.
         assert!(h.state().get_methods().row_count() > 11, "uzun liste kaymali");
@@ -371,7 +384,7 @@ mod tests {
         h.advance(400);
         h.click(60.0, 26.0);
         h.advance(400);
-        assert_eq!((dns.get(), method.get() >= 0), (-1, true));
+        assert_eq!((dns.get(), method.get() >= 0, isp.get()), (-1, true, 1));
         assert_eq!(toggles.get(), 0, "menu dokunuslari baglanti simgesine gecmemeli");
         assert_eq!(h.page(), (0, 0));
     }
@@ -510,10 +523,10 @@ mod tests {
         h.state().on_power_toggle(f);
         let (starts, g) = counter();
         h.state().on_start_service(g);
-        h.click(200.0, 258.0);
+        h.click(200.0, 236.0);
         assert_eq!((toggles.get(), starts.get()), (1, 0));
         h.state().set_service_missing(true);
-        h.click(200.0, 258.0);
+        h.click(200.0, 236.0);
         assert_eq!((toggles.get(), starts.get()), (1, 1));
     }
 
@@ -558,11 +571,11 @@ mod tests {
         gallery::sample(&h, EngineState::Off);
         h.state().set_power(PowerState::On);
         h.advance(1500);
-        let (r, g, b) = h.pixel(141.0, 258.0);
+        let (r, g, b) = h.pixel(141.0, 236.0);
         assert!(g > 150 && r < 120 && b < 140, "bagliyken dairenin sol kenari yesil olmali: {:?}", (r, g, b));
         h.state().set_power(PowerState::Error);
         h.advance(1500);
-        let (r, g, _) = h.pixel(143.0, 300.0);
+        let (r, g, _) = h.pixel(143.0, 278.0);
         assert!(r > 200 && g < 120, "hatada kose parantezi kirmizi olmali: {:?}", (r, g));
     }
 }
@@ -588,7 +601,7 @@ mod gallery {
         sample(&h, EngineState::Off);
         h.advance(600);
         let (w, hh) = h.size();
-        let crop = (192, 300, 416, 432);
+        let crop = (192, 256, 416, 432);
         let grab = |h: &mut Harness, name: &str, steps: &[u64]| {
             let mut frames = Vec::new();
             for &ms in steps {
@@ -687,6 +700,12 @@ mod gallery {
             let t = if dark { "dark" } else { "light" };
             h.advance(1500);
             h.shot(&format!("{t}-home-on"));
+            h.click(200.0, 510.0);
+            h.advance(400);
+            h.hover(250.0, 260.0);
+            h.shot(&format!("{t}-home-isp-menu"));
+            h.click(60.0, 26.0);
+            h.advance(400);
             h.click(200.0, 554.0);
             h.advance(400);
             h.hover(250.0, 218.0);

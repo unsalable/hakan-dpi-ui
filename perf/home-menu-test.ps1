@@ -175,6 +175,18 @@ try {
     Click 60 26
     $after = Shot "home-menu-4-dismissed"
     Check "disari tiklayinca menu secmeden kapandi" ((Same (Px $after 300 150) $bg) -and $svc.ConfigCount() -eq 2)
+
+    Write-Host "Saglayici menusu"
+    # En ustteki satir (y 488-532); 9 saglayici: menu y 168-484, ikinci oge Turk Telekom.
+    Click 200 510
+    $isp = Shot "home-menu-5-isp"
+    Check "saglayici menusu acildi" (-not (Same (Px $isp 300 200) (Px $homeShot 300 200)))
+    Click 250 224
+    for ($i = 0; $i -lt 20 -and $svc.ConfigCount() -lt 3; $i++) { Start-Sleep -Milliseconds 100 }
+    Check "saglayici secimi tek istekle gitti" ($svc.ConfigCount() -eq 3)
+    if ($svc.ConfigCount() -ge 3) {
+        Check "saglayici Turk Telekom, onerdigi yontemle (disorder)" ($svc.Config(2) -match '"isp":"turktelekom","method":"disorder"')
+    }
     Check "pencere acik" (-not $p.HasExited)
     Write-Host "  goruntuler: $OutDir\home-menu-*.png"
 }

@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 /// Hakan surumu: guncellemeler ana uygulamanin deposundan (unsalable/dpi-ui) degil, bu kopyanin
 /// kendi deposundan gelir. Boylece ana surumler bu kopyanin uzerine kurulmaz; bu kopyanin
 /// surumleri de ana uygulamayi kullananlara gitmez.
-pub const REPO: &str = "unsalable/dpi-ui-hakan";
-pub const RELEASES_API: &str = "https://api.github.com/repos/unsalable/dpi-ui-hakan/releases?per_page=20";
-pub const RELEASES_PAGE: &str = "https://github.com/unsalable/dpi-ui-hakan/releases";
-pub const SOURCE_PAGE: &str = "https://github.com/unsalable/dpi-ui-hakan";
+pub const REPO: &str = "unsalable/hakan-dpi-ui";
+pub const RELEASES_API: &str = "https://api.github.com/repos/unsalable/hakan-dpi-ui/releases?per_page=20";
+pub const RELEASES_PAGE: &str = "https://github.com/unsalable/hakan-dpi-ui/releases";
+pub const SOURCE_PAGE: &str = "https://github.com/unsalable/hakan-dpi-ui";
 pub const INSTALLER_NAME: &str = "DPI-UI-Setup.exe";
 /// Eski ad: 3.0.0-alpha.1 bu adi arar; gecis surumunde paket bu adla da yayinlanir.
 pub const LEGACY_INSTALLER_NAME: &str = "GoodbyeDPI-UI-3-Setup.exe";

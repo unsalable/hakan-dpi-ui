@@ -6,7 +6,7 @@ members = ["apps/service", "apps/ui", "crates/engine", "crates/shared", "crates/
 version = "3.0.9"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/unsalable/dpi-ui-hakan"
+repository = "https://github.com/unsalable/hakan-dpi-ui"
 
 [profile.release]
 opt-level = 3

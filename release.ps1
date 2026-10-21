@@ -1,5 +1,5 @@
 # DPI UI (Hakan surumu) - surum yayinlama
-# Bu kopyanin surumleri YALNIZCA unsalable/dpi-ui-hakan deposuna gider. Ana uygulamanin deposuna
+# Bu kopyanin surumleri YALNIZCA unsalable/hakan-dpi-ui deposuna gider. Ana uygulamanin deposuna
 # (unsalable/dpi-ui) yayin yapilirsa ana uygulamayi kullanan herkese bu surum kurulurdu; betik
 # bu yuzden origin bu kopyanin deposu degilse durur.
 # 1) surum numarasini denetler (Cargo.toml ve installer\setup.iss ayni olmali)
@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-$Repo = "unsalable/dpi-ui-hakan"
+$Repo = "unsalable/hakan-dpi-ui"
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw "surum bicimi gecersiz: $Version" }
 if (-not (Test-Path $Key)) { throw "imza anahtari yok: $Key" }
 $origin = git remote get-url origin

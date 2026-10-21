@@ -1,16 +1,17 @@
 # DPI UI — Hakan sürümü
 
-[![CI](https://github.com/unsalable/dpi-ui-hakan/actions/workflows/ci.yml/badge.svg)](https://github.com/unsalable/dpi-ui-hakan/actions/workflows/ci.yml)
+[![CI](https://github.com/unsalable/hakan-dpi-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/unsalable/hakan-dpi-ui/actions/workflows/ci.yml)
 [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-blue.svg)](LICENSE)
 
-[DPI UI](https://github.com/unsalable/dpi-ui)'ın bağımsız bir kopyası. Tek fark: **yöntem ve DNS
-ana ekrandan değişir.** Satıra dokununca sayfa değişmeden yerinde bir menü açılır, seçim hemen
-uygulanır (eski GoodbyeDPI UI'daki açılır listeler gibi). Sağlayıcı, DNS kipi, özel DNS ve diğer
-ayarlar Ayarlar'da durur.
+[DPI UI](https://github.com/unsalable/dpi-ui)'ın bağımsız bir kopyası. Tek fark: **internet
+sağlayıcı, yöntem ve DNS ana ekrandan değişir.** Satıra dokununca sayfa değişmeden yerinde bir menü
+açılır, seçim hemen uygulanır (eski GoodbyeDPI UI'daki açılır listeler gibi); sağlayıcı seçmek onun
+önerdiği yöntemi de seçer. DNS kipi, özel DNS ve diğer ayarlar Ayarlar'da durur.
 
-Bu kopya güncellemelerini yalnızca **bu depodan** alır: ana uygulamanın sürümleri bunun üzerine
-kurulmaz, bu kopyanın sürümleri de ana uygulamayı kullananlara gitmez. Ana uygulamadaki
-değişiklikleri almak için:
+Bu kopya güncellemelerini yalnızca **bu depodan** alır ve kendiliğinden, sessizce kurar: buraya
+yeni bir sürüm (Release) yayınlanınca Hakan'ın uygulaması onu indirir, imzasını doğrular ve kurar.
+Ana uygulamanın sürümleri bunun üzerine kurulmaz, bu kopyanın sürümleri de ana uygulamayı
+kullananlara gitmez. Ana uygulamadaki değişiklikleri alıp yeni sürüm yayınlamak için:
 
 ```powershell
 git fetch upstream            # upstream = https://github.com/unsalable/dpi-ui (yalnizca okunur)
@@ -18,7 +19,7 @@ git merge upstream/main
 powershell -ExecutionPolicy Bypass -File release.ps1 -Version 3.0.10 -Bump -Notes "Degisiklikler"
 ```
 
-`release.ps1` yalnızca bu depoya (`unsalable/dpi-ui-hakan`) yayın yapar; `origin` başka bir depoysa durur.
+`release.ps1` yalnızca bu depoya (`unsalable/hakan-dpi-ui`) yayın yapar; `origin` başka bir depoysa durur.
 
 Türkiye için hafif, kararlı ve sade bir DPI atlatma uygulaması. GoodbyeDPI UI 2.x'in yerine
 sıfırdan, Rust ile yazıldı; kendi DPI motorunu kullanır.
@@ -31,14 +32,14 @@ sıfırdan, Rust ile yazıldı; kendi DPI motorunu kullanır.
 - **Şifreli DNS (DoH/DoT):** ağ ayarlarına dokunmadan; ulaşılamazsa sistem DNS'ine döner.
 - İnternet sağlayıcısına özel hazır yöntemler (Türk Telekom, Superonline, Vodafone, TürkNet,
   Kablonet ve mobil hatlar), özel DNS, istisna listesi, eski sürüm ayarlarını otomatik aktarma.
-- **Otomatik güncelleme:** yeni sürümler bu depodaki [Releases](https://github.com/unsalable/dpi-ui-hakan/releases)
+- **Otomatik güncelleme:** yeni sürümler bu depodaki [Releases](https://github.com/unsalable/hakan-dpi-ui/releases)
   sayfasından gelir; paket yalnızca imzası doğrulanırsa kurulur.
 - **Türkçe ve İngilizce:** varsayılan olarak Windows'un dilini kullanır; Ayarlar → Görünüm'den
   değiştirilebilir. *Available in English: Settings → Appearance → Language.*
 
 ## Kurulum
 
-[Releases](https://github.com/unsalable/dpi-ui-hakan/releases) sayfasından en son
+[Releases](https://github.com/unsalable/hakan-dpi-ui/releases) sayfasından en son
 `DPI-UI-Setup.exe` dosyasını indirip çalıştırın. Kurulum yönetici izni ister (WinDivert
 sürücüsü ve motor hizmeti için); sonrasında uygulama normal kullanıcı olarak çalışır.
 
