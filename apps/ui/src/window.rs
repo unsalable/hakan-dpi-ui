@@ -39,6 +39,8 @@ struct Ctx {
     toast_serial: Cell<i32>,
     method_ids: RefCell<Vec<String>>,
     dns_ids: RefCell<Vec<String>>,
+    /// Ana ekran DNS menusunun ogeleri (None = kapali).
+    quick_dns_ids: RefCell<Vec<Option<String>>>,
     /// Kullanici "baglan" dedi; sonuc gelene (ve en az MIN_BUSY gecene) kadar tarama gosterilir.
     pending_connect: Cell<Option<Instant>>,
     /// Kapanma basladi.
@@ -95,6 +97,7 @@ impl Ctx {
             toast_serial: Cell::new(0),
             method_ids: RefCell::new(Vec::new()),
             dns_ids: RefCell::new(Vec::new()),
+            quick_dns_ids: RefCell::new(Vec::new()),
             pending_connect: Cell::new(None),
             closing: Cell::new(false),
             update: RefCell::new(UpdateStatus::default()),
@@ -369,42 +372,15 @@ impl Ctx {
             DnsMode::Encrypted => 1,
             DnsMode::Redirect => 2,
         });
-        let mut dns_ids = Vec::new();
-        let mut providers = Vec::new();
-        for p in shared::dns::PRESETS {
-            let fits = match cfg.dns.mode {
-                DnsMode::Encrypted => p.supports_doh(),
-                DnsMode::Redirect => p.supports_redirect(),
-                DnsMode::Off => false,
-            };
-            if fits {
-                let detail = match cfg.dns.mode {
-                    DnsMode::Redirect => {
-                        let (a, port) = p.udp_v4.unwrap_or(("", 53));
-                        format!("{} · {a}:{port}", p.about(en))
-                    }
-                    _ => format!("{} · {}", p.about(en), if p.doh_url.starts_with("tls://") { "DoT" } else { "DoH" }),
-                };
-                providers.push(Choice { id: s(p.id), title: s(p.label(en)), subtitle: s(detail), badge: s("") });
-                dns_ids.push(p.id.to_owned());
-            }
-        }
-        for c in &cfg.dns.custom {
-            let fits = matches!((cfg.dns.mode, c.kind), (DnsMode::Encrypted, CustomDnsKind::Doh) | (DnsMode::Redirect, CustomDnsKind::Udp));
-            if fits {
-                providers.push(Choice {
-                    id: s(c.id.as_str()),
-                    title: s(t!("Özel · {}", "Custom · {}", c.name)),
-                    subtitle: s(custom_dns_address(c)),
-                    badge: s(""),
-                });
-                dns_ids.push(c.id.clone());
-            }
-        }
+        let (dns_ids, providers) = dns_choices(&cfg, cfg.dns.mode, en);
         let dns_index = dns_ids.iter().position(|i| i.eq_ignore_ascii_case(&cfg.dns.provider)).map_or(-1, |i| i as i32);
         st.set_dns_providers(model(providers));
         st.set_dns_index(dns_index);
         *self.dns_ids.borrow_mut() = dns_ids;
+        let (quick_ids, quick, quick_index) = quick_dns(&cfg, en);
+        st.set_quick_dns(model(quick));
+        st.set_quick_dns_index(quick_index);
+        *self.quick_dns_ids.borrow_mut() = quick_ids;
         st.set_custom_dns(model(
             cfg.dns
                 .custom
@@ -700,6 +676,73 @@ fn learn_reason(reason: &str) -> String {
     }
 }
 
+/// Bir DNS kipinin secilebilir sunuculari (hazirlar, sonra o kipe uyan ozeller): kimlikler ve satirlar.
+fn dns_choices(cfg: &AppConfig, mode: DnsMode, en: bool) -> (Vec<String>, Vec<Choice>) {
+    let mut ids = Vec::new();
+    let mut items = Vec::new();
+    for p in shared::dns::PRESETS {
+        let fits = match mode {
+            DnsMode::Encrypted => p.supports_doh(),
+            DnsMode::Redirect => p.supports_redirect(),
+            DnsMode::Off => false,
+        };
+        if fits {
+            let detail = match mode {
+                DnsMode::Redirect => {
+                    let (a, port) = p.udp_v4.unwrap_or(("", 53));
+                    format!("{} · {a}:{port}", p.about(en))
+                }
+                _ => format!("{} · {}", p.about(en), if p.doh_url.starts_with("tls://") { "DoT" } else { "DoH" }),
+            };
+            items.push(Choice { id: s(p.id), title: s(p.label(en)), subtitle: s(detail), badge: s("") });
+            ids.push(p.id.to_owned());
+        }
+    }
+    for c in &cfg.dns.custom {
+        let fits = matches!((mode, c.kind), (DnsMode::Encrypted, CustomDnsKind::Doh) | (DnsMode::Redirect, CustomDnsKind::Udp));
+        if fits {
+            items.push(Choice {
+                id: s(c.id.as_str()),
+                title: s(t!("Özel · {}", "Custom · {}", c.name)),
+                subtitle: s(custom_dns_address(c)),
+                badge: s(""),
+            });
+            ids.push(c.id.clone());
+        }
+    }
+    (ids, items)
+}
+
+/// Ana ekrandaki DNS menusu: basta "Kapali", sonra gecerli kipin sunuculari. DNS kapaliysa sifreli
+/// sunucular listelenir (birini secmek sifreli kipe gecirir). Ucuncu deger secili ogenin sirasi.
+fn quick_dns(cfg: &AppConfig, en: bool) -> (Vec<Option<String>>, Vec<Choice>, i32) {
+    let mode = if cfg.dns.mode == DnsMode::Off { DnsMode::Encrypted } else { cfg.dns.mode };
+    let (ids, items) = dns_choices(cfg, mode, en);
+    let index = if cfg.dns.mode == DnsMode::Off {
+        0
+    } else {
+        ids.iter().position(|i| i.eq_ignore_ascii_case(&cfg.dns.provider)).map_or(-1, |i| i as i32 + 1)
+    };
+    let mut all_ids = vec![None];
+    all_ids.extend(ids.into_iter().map(Some));
+    let mut all = vec![Choice { id: s("off"), title: s(t!("Kapalı", "Off")), subtitle: s(""), badge: s("") }];
+    all.extend(items);
+    (all_ids, all, index)
+}
+
+/// Ana ekran DNS menusunden secim: None DNS'i kapatir; sunucu secmek DNS kapaliysa sifreli kipi acar.
+fn pick_quick_dns(cfg: &mut AppConfig, id: Option<String>) {
+    match id {
+        None => cfg.dns.mode = DnsMode::Off,
+        Some(id) => {
+            if cfg.dns.mode == DnsMode::Off {
+                cfg.dns.mode = DnsMode::Encrypted;
+            }
+            cfg.dns.provider = id;
+        }
+    }
+}
+
 fn host_items(list: &[String]) -> Vec<HostItem> {
     list.iter().map(|h| HostItem { key: s(h.as_str()), name: s(h.as_str()), note: s("") }).collect()
 }
@@ -982,6 +1025,12 @@ fn bind_callbacks(app: &AppWindow) {
             c.edit(|cfg| cfg.dns.provider = id);
         })
     });
+    st.on_select_quick_dns(|i| {
+        with_ctx(|c| {
+            let Some(id) = c.quick_dns_ids.borrow().get(i as usize).cloned() else { return };
+            c.edit(|cfg| pick_quick_dns(cfg, id));
+        })
+    });
     st.on_set_dns_fallback(|v| with_ctx(|c| c.edit(|cfg| cfg.dns.fallback_to_system = v)));
     st.on_set_dns_skip_vpn(|v| with_ctx(|c| c.edit(|cfg| cfg.dns.skip_on_vpn = v)));
     st.on_add_custom_dns(|name, addr, boot| {
@@ -1194,6 +1243,49 @@ mod tests {
         assert_eq!(d.kind, CustomDnsKind::Doh);
         assert!(parse_custom_dns("x", "https://dns.nextdns.io/abc", "").unwrap_err().contains("IP"));
         assert!(parse_custom_dns("x", "dns.google", "").is_err());
+    }
+
+    /// Ana ekran DNS menusu: "Kapali" + sunucular; DNS kapaliyken sifreli sunucular listelenir ve
+    /// birini secmek sifreli kipi acar. Her secim gecerli bir ayar uretir.
+    #[test]
+    fn quick_dns_menu_switches_in_one_pick() {
+        let ids_of = |cfg: &AppConfig| quick_dns(cfg, false).0;
+        let mut cfg = AppConfig::default().sanitized();
+        cfg.dns.mode = DnsMode::Encrypted;
+        cfg.dns.provider = "google".into();
+        let (ids, items, index) = quick_dns(&cfg, false);
+        assert_eq!(ids.len(), items.len());
+        assert_eq!((ids[0].as_deref(), items[0].title.as_str()), (None, "Kapalı"));
+        assert_eq!(ids[index as usize].as_deref(), Some("google"), "secili sunucu isaretli olmali");
+        assert_eq!(ids.len(), 1 + shared::dns::PRESETS.iter().filter(|p| p.supports_doh()).count());
+
+        pick_quick_dns(&mut cfg, None);
+        assert_eq!(cfg.dns.mode, DnsMode::Off);
+        assert!(cfg.validate().is_ok());
+        let (off_ids, _, off_index) = quick_dns(&cfg, false);
+        assert_eq!(off_index, 0, "kapaliyken 'Kapali' isaretli");
+        assert_eq!(off_ids, ids_of(&{
+            let mut c = cfg.clone();
+            c.dns.mode = DnsMode::Encrypted;
+            c
+        }), "kapaliyken sifreli sunucular listelenir");
+
+        // Kapaliyken sunucu secmek tek adimda sifreli kipi acar (Yandex yalnizca DoT destekler).
+        pick_quick_dns(&mut cfg, Some("yandex".into()));
+        assert_eq!((cfg.dns.mode, cfg.dns.provider.as_str()), (DnsMode::Encrypted, "yandex"));
+        assert!(cfg.validate().is_ok());
+
+        // Yonlendirme kipinde o kipin sunuculari listelenir; secim kipi degistirmez.
+        cfg.dns.mode = DnsMode::Redirect;
+        let redirect = ids_of(&cfg);
+        assert!(!redirect.contains(&Some("mullvad".into())), "Mullvad'in yonlendirme adresi yok");
+        pick_quick_dns(&mut cfg, Some("opendns".into()));
+        assert_eq!((cfg.dns.mode, cfg.dns.provider.as_str()), (DnsMode::Redirect, "opendns"));
+        assert!(cfg.validate().is_ok());
+
+        // Ozel sunucu kendi kipinin listesinde gorunur.
+        cfg.dns.custom.push(CustomDns { id: "custom".into(), ..parse_custom_dns("Ev", "9.9.9.9", "").unwrap() });
+        assert_eq!(ids_of(&cfg).last(), Some(&Some("custom".into())));
     }
 
     /// Dokununca tarama en az MIN_BUSY gorunur; hic yanit gelmezse MAX_PENDING sonra gercek durum.

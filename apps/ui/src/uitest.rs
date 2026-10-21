@@ -237,6 +237,7 @@ fn png(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
     use shared::ipc::EngineState;
+    use slint::Model;
 
     fn counter() -> (Rc<Cell<i32>>, impl Fn() + 'static) {
         let c = Rc::new(Cell::new(0));
@@ -303,16 +304,81 @@ mod tests {
         h.advance(500);
         assert_eq!(h.app.get_depth(), 0, "menudeki geri dugmesi ana ekrana donmeli");
 
-        // Ana ekrandaki Yontem/DNS satirlari dogrudan alt sayfayi acar; geri ana ekrana doner.
-        for (y, sub) in [(554.0, 1), (598.0, 2)] {
+        // Ana ekrandaki Yontem/DNS satirlari sayfa degistirmez (yerinde menu acar; menuyu disari
+        // tiklayarak kapatinca ana ekranda kalinir).
+        for y in [554.0, 598.0] {
             h.click(200.0, y);
             h.advance(500);
-            assert_eq!(h.page(), (2, sub));
-            h.click(30.0, 26.0);
+            assert_eq!(h.app.get_depth(), 0, "satir y={y} sayfa acmamali");
+            h.click(60.0, 26.0);
             h.advance(500);
-            assert_eq!(h.app.get_depth(), 0, "ana ekrandan acilan sayfa ana ekrana donmeli");
+            assert_eq!(h.app.get_depth(), 0);
         }
     }
+
+    /// Ana ekranda Yontem ve DNS iki dokunusla degisir: satira dokun, menuden sec. Menu satirin
+    /// ustunde acilir, secince kapanir; disari dokunmak secmeden kapatir.
+    #[test]
+    fn home_menus_pick_in_place() {
+        let mut h = Harness::new(1.0);
+        gallery::sample(&h, EngineState::On);
+        let method = Rc::new(Cell::new(-1));
+        let m = method.clone();
+        h.state().on_select_method(move |i| m.set(i));
+        let dns = Rc::new(Cell::new(-1));
+        let d = dns.clone();
+        h.state().on_select_quick_dns(move |i| d.set(i));
+        let (toggles, f) = counter();
+        h.state().on_power_toggle(f);
+
+        // Yontem: 16 hazir yontem, menu en fazla 400 px; secili (ilk) oge en ustte.
+        assert!(h.state().get_methods().row_count() > 11, "uzun liste kaymali");
+        h.click(200.0, 554.0);
+        h.advance(400);
+        h.click(250.0, METHOD_MENU_TOP + 5.0 + 34.0 * 2.0 + 17.0);
+        assert_eq!(method.get(), 2, "ucuncu yontem secilmeli");
+        assert_eq!(h.page(), (0, 0));
+        // Menu kapandi: ilk ogenin yerine (ana ekranda bos alan) dokunmak bir sey secmez.
+        method.set(-1);
+        h.advance(400);
+        h.click(350.0, METHOD_MENU_TOP + 5.0 + 17.0);
+        assert_eq!(method.get(), -1, "menu secimden sonra kapanmali");
+
+        // Uzun listede asagi kaydirip sonuncuyu secmek.
+        h.click(200.0, 554.0);
+        h.advance(400);
+        h.scroll(250.0, 300.0, -800.0);
+        h.click(250.0, 528.0 - 5.0 - 17.0);
+        assert_eq!(method.get(), h.state().get_methods().row_count() as i32 - 1, "kaydirinca son yontem secilebilmeli");
+
+        // DNS: ilk oge "Kapali", sonra sunucular.
+        let rows = h.state().get_quick_dns().row_count() as f32;
+        let top = 576.0 - 4.0 - (rows * 34.0 + 10.0);
+        h.click(200.0, 598.0);
+        h.advance(400);
+        h.click(250.0, top + 5.0 + 17.0);
+        assert_eq!(dns.get(), 0, "'Kapali' secilmeli");
+        h.advance(400);
+        h.click(200.0, 598.0);
+        h.advance(400);
+        h.click(250.0, top + 5.0 + 34.0 * 2.0 + 17.0);
+        assert_eq!(dns.get(), 2);
+
+        // Disari dokunmak secmeden kapatir.
+        dns.set(-1);
+        h.advance(400);
+        h.click(200.0, 598.0);
+        h.advance(400);
+        h.click(60.0, 26.0);
+        h.advance(400);
+        assert_eq!((dns.get(), method.get() >= 0), (-1, true));
+        assert_eq!(toggles.get(), 0, "menu dokunuslari baglanti simgesine gecmemeli");
+        assert_eq!(h.page(), (0, 0));
+    }
+
+    /// Yontem menusunun ust kenari: 16 yontemde menu en buyuk boyunda (400 px), alt kenari
+    /// Yontem satirinin (y = 532) 4 px ustunde.
+    const METHOD_MENU_TOP: f32 = 532.0 - 4.0 - 400.0;
 
     /// Ayarlar ve geri dugmelerine hizli hizli basmak pencere suruklemeyi baslatmamali. Gecis
     /// sirasinda dugmeler kaydigi icin tiklamalar ust cubugun bos yerine denk gelir; suruklemede
@@ -609,6 +675,50 @@ mod gallery {
         h.advance(600);
         h.scroll(200.0, 400.0, -600.0);
         h.shot("state-sites-bottom");
+    }
+
+    /// Ana ekranda acik Yontem ve DNS menuleri, koyu ve acik temada (uzerine gelinmis bir ogeyle).
+    #[test]
+    fn home_menus() {
+        let mut h = Harness::new(1.0);
+        sample(&h, EngineState::On);
+        for dark in [true, false] {
+            h.set_dark(dark);
+            let t = if dark { "dark" } else { "light" };
+            h.advance(1500);
+            h.shot(&format!("{t}-home-on"));
+            h.click(200.0, 554.0);
+            h.advance(400);
+            h.hover(250.0, 218.0);
+            h.shot(&format!("{t}-home-method-menu"));
+            h.click(60.0, 26.0);
+            h.advance(400);
+            h.click(200.0, 598.0);
+            h.advance(400);
+            h.hover(250.0, 400.0);
+            h.shot(&format!("{t}-home-dns-menu"));
+            h.click(60.0, 26.0);
+            h.advance(400);
+        }
+    }
+
+    /// Yontem menusu 2x olcekte (yazi ve isaret keskinligi), menunun acilisi kare kare.
+    #[test]
+    fn home_menu_2x() {
+        let mut h = Harness::new(2.0);
+        sample(&h, EngineState::Off);
+        h.advance(600);
+        let (w, hh) = h.size();
+        h.click(200.0, 554.0);
+        let mut frames = Vec::new();
+        for _ in 0..6 {
+            frames.push(h.frame());
+            h.advance(40);
+        }
+        strip("home-method-menu-open-2x", &frames, w, hh, (200, 200, 600, 1080));
+        h.advance(300);
+        let f = h.frame();
+        strip("home-method-menu-2x", &[f], w, hh, (0, 200, 800, 1080));
     }
 
     /// Simge ayrintilari icin 2x olcekte menu (ust kisim kirpilir).

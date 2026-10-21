@@ -4,15 +4,13 @@ import { Theme, Type, Metrics, Motion, Curves } from "tokens.slint";
 import { Icons } from "icons.slint";
 import { ConnectGlyph, PowerState } from "connect.slint";
 import { Icon, Tile, Segmented, GlyphButton } from "components.slint";
-import { Page, NavBar, DragArea, Group, NavRow, ToggleRow, CheckRow, PickerRow, ActionRow, FieldRow, ItemRow, EmptyRow, ValueRow } from "widgets.slint";
+import { Page, NavBar, DragArea, Group, NavRow, MenuRow, ToggleRow, CheckRow, PickerRow, ActionRow, FieldRow, ItemRow, EmptyRow, ValueRow } from "widgets.slint";
 import { AppState, HostItem } from "state.slint";
 
 // ================================================================== ana ekran
 
 export component HomePage inherits Page {
     callback open-settings();
-    callback open-method();
-    callback open-dns();
 
     VerticalLayout {
         // Ust cubuk: solda ayarlar; sagdaki pencere dugmeleri ust katmanda.
@@ -133,31 +131,37 @@ export component HomePage inherits Page {
             vertical-stretch: 1;
         }
 
+        // Yontem ve DNS ana ekrandan degisir: satir yerinde menu acar, secim hemen uygulanir.
+        // Saglayici, DNS kipi ve diger ayrintilar Ayarlar'da kalir.
         HorizontalLayout {
             padding-left: Metrics.margin;
             padding-right: Metrics.margin;
             padding-bottom: 20px;
             Group {
-                NavRow {
+                MenuRow {
                     first: true;
                     icon: Icons.fill-bolt;
                     tint: Theme.orange;
                     title: @tr("Yöntem");
                     value: AppState.method-name;
-                    clicked => {
-                        root.open-method();
+                    options: AppState.methods;
+                    current-index: AppState.method-index;
+                    selected(index) => {
+                        AppState.select-method(index);
                     }
                 }
 
-                NavRow {
+                MenuRow {
                     last: true;
                     icon: Icons.line-globe;
                     filled: false;
                     tint: Theme.blue;
                     title: "DNS";
                     value: AppState.dns-name;
-                    clicked => {
-                        root.open-dns();
+                    options: AppState.quick-dns;
+                    current-index: AppState.quick-dns-index;
+                    selected(index) => {
+                        AppState.select-quick-dns(index);
                     }
                 }
             }
@@ -1076,7 +1080,7 @@ export component AboutPage inherits SubPage {
             value: "GitHub";
             link: true;
             clicked => {
-                AppState.open-url("https://github.com/unsalable/dpi-ui");
+                AppState.open-url("https://github.com/unsalable/dpi-ui-hakan");
             }
         }
     }

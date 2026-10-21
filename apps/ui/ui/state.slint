@@ -62,6 +62,10 @@ export global AppState {
     in-out property <bool> dns-skip-vpn: true;
     in-out property <[BenchItem]> bench;
     in-out property <bool> bench-running;
+    /// Ana ekrandaki DNS menusu: basta "Kapali", sonra sunucular (DNS kapaliysa sifreli olanlar).
+    in-out property <[Choice]> quick-dns;
+    /// -1: secili sunucu listede yok.
+    in-out property <int> quick-dns-index;
 
     // ---------------------------------------------------------------- siteler
     /// 0 = akilli liste, 1 = tum trafik
@@ -101,6 +105,7 @@ export global AppState {
     callback select-method(int);
     callback set-dns-mode(int);
     callback select-dns(int);
+    callback select-quick-dns(int);
     callback set-dns-fallback(bool);
     callback set-dns-skip-vpn(bool);
     callback add-custom-dns(string, string, string) -> string;

@@ -4,7 +4,7 @@
 import { Theme, Type, Metrics, Motion, Curves } from "tokens.slint";
 import { Icons } from "icons.slint";
 import { Icon, Tile, Switch, TextButton, BackButton } from "components.slint";
-import { AppState } from "state.slint";
+import { AppState, Choice } from "state.slint";
 
 /// Her ekranin zemini. Bos alanlara yapilan tiklamalari yutar (alttaki sayfaya gecmez);
 /// ustune baska sayfa itildiginde hafifce kararir.
@@ -432,6 +432,158 @@ export component PickerRow inherits RowBase {
     }
 
     property <length> menu-width: 230px;
+}
+
+/// Simge karosu + baslik + secili deger; tiklayinca menu satirin ustunde, yerinde acilir
+/// (sayfa degismeden iki dokunusla secim). Uzun listeler menunun icinde kayar; acilista
+/// secili oge gorunur.
+export component MenuRow inherits RowBase {
+    in property <string> icon;
+    in property <bool> filled: true;
+    in property <color> tint: Theme.gray;
+    in property <string> title;
+    in property <string> value;
+    in property <[Choice]> options;
+    in property <int> current-index;
+    callback selected(int);
+    inset: 58px;
+    gap: 14px;
+    accessible-role: combobox;
+    accessible-label: root.title;
+    accessible-value: root.value;
+    clicked => {
+        menu.show();
+    }
+
+    VerticalLayout {
+        alignment: center;
+        Tile {
+            icon: root.icon;
+            filled: root.filled;
+            tint: root.tint;
+        }
+    }
+
+    Text {
+        text: root.title;
+        color: Theme.label;
+        font-size: Type.body;
+        vertical-alignment: center;
+        horizontal-stretch: 1;
+        overflow: elide;
+    }
+
+    Text {
+        text: root.value;
+        color: Theme.secondary;
+        font-size: Type.body;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+        overflow: elide;
+        max-width: 170px;
+    }
+
+    VerticalLayout {
+        alignment: center;
+        Icon {
+            commands: Icons.line-updown;
+            width: 14px;
+            height: 14px;
+            weight: 2px;
+            tint: Theme.secondary;
+        }
+
+        // Satirlar ekranin altinda: menu yukari acilir, alt kenari satirin hemen ustunde durur.
+        menu := PopupWindow {
+            x: -root.menu-width + 22px;
+            y: -self.height - 4px;
+            width: root.menu-width;
+            height: min(root.max-menu-height, root.options.length * root.item-height + 10px);
+            close-policy: close-on-click-outside;
+
+            Rectangle {
+                property <bool> shown: false;
+                init => {
+                    self.shown = true;
+                }
+                width: 100%;
+                height: 100%;
+                y: self.shown ? 0 : 8px;
+                animate y { duration: 220ms * Motion.scale; easing: Curves.out; }
+                background: Theme.elevated;
+                border-radius: 12px;
+                border-width: 1px;
+                border-color: Theme.elevated-stroke;
+
+                // Kayan icerik kenardan 5 px iceride kirpilir (yuvarlak kosenin icinde kalir).
+                Flickable {
+                    y: 5px;
+                    height: parent.height - 10px;
+                    content-height: root.options.length * root.item-height;
+                    init => {
+                        self.content-y = -clamp(root.current-index * root.item-height - (self.height - root.item-height) / 2, 0px, max(0px, self.content-height - self.height));
+                    }
+
+                    VerticalLayout {
+                        padding-left: 5px;
+                        padding-right: 5px;
+                        for option[index] in root.options: Rectangle {
+                            height: root.item-height;
+                            border-radius: 7px;
+                            background: item.has-hover ? Theme.fill.with-alpha(0.8) : transparent;
+                            accessible-role: list-item;
+                            accessible-label: option.title;
+                            accessible-item-selected: index == root.current-index;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 10px;
+                                spacing: 6px;
+                                VerticalLayout {
+                                    alignment: center;
+                                    Icon {
+                                        commands: Icons.line-check;
+                                        width: 15px;
+                                        height: 15px;
+                                        weight: 2.2px;
+                                        tint: Theme.label.with-alpha(index == root.current-index ? 1 : 0);
+                                    }
+                                }
+
+                                Text {
+                                    text: option.title;
+                                    color: Theme.label;
+                                    font-size: Type.body;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                    overflow: elide;
+                                }
+
+                                if option.badge != "": Text {
+                                    text: option.badge;
+                                    color: Theme.green;
+                                    font-size: Type.footnote;
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            item := TouchArea {
+                                clicked => {
+                                    root.selected(index);
+                                    menu.close();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    property <length> menu-width: 240px;
+    property <length> item-height: 34px;
+    /// Yaklasik on bir bucuk oge: yarim gorunen son oge listenin kaydigini belli eder.
+    property <length> max-menu-height: 400px;
 }
 
 /// Satir boyunca tek bir eylem (mavi ya da yikici kirmizi metin).

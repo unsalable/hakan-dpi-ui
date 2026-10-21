@@ -1,4 +1,7 @@
-# DPI UI - surum yayinlama
+# DPI UI (Hakan surumu) - surum yayinlama
+# Bu kopyanin surumleri YALNIZCA unsalable/dpi-ui-hakan deposuna gider. Ana uygulamanin deposuna
+# (unsalable/dpi-ui) yayin yapilirsa ana uygulamayi kullanan herkese bu surum kurulurdu; betik
+# bu yuzden origin bu kopyanin deposu degilse durur.
 # 1) surum numarasini denetler (Cargo.toml ve installer\setup.iss ayni olmali)
 # 2) publish.ps1 ile paketi derler   3) imzalar ve dogrular (tools\release)
 # 4) etiketi gonderir ve GitHub'da surumu olusturur (on surumler "pre-release" isaretlenir)
@@ -24,8 +27,13 @@ param(
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+$Repo = "unsalable/dpi-ui-hakan"
 if ($Version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') { throw "surum bicimi gecersiz: $Version" }
 if (-not (Test-Path $Key)) { throw "imza anahtari yok: $Key" }
+$origin = git remote get-url origin
+if (-not $DryRun -and $origin -notmatch "github\.com[/:]$([regex]::Escape($Repo))(\.git)?$") {
+    throw "origin $Repo degil ($origin); Hakan surumu yalnizca kendi deposundan yayinlanir"
+}
 
 $cargo = Get-Content Cargo.toml -Raw
 $iss = Get-Content installer\setup.iss -Raw
@@ -70,10 +78,10 @@ $tag = "v$Version"
 git tag -a $tag -m "DPI UI $Version"
 git push origin HEAD
 git push origin $tag
-$ghArgs = @("release", "create", $tag, "$out\DPI-UI-Setup.exe", "$out\update.json", "$out\update.json.sig")
+$ghArgs = @("release", "create", $tag, "$out\DPI-UI-Setup.exe", "$out\update.json", "$out\update.json.sig", "--repo", $Repo)
 if ($Legacy) { $ghArgs += "$out\GoodbyeDPI-UI-3-Setup.exe" }
 $ghArgs += @("--title", "DPI UI $Version", "--notes", $(if ($Notes) { $Notes } else { "DPI UI $Version" }))
 if ($Version.Contains("-")) { $ghArgs += "--prerelease" }
 & gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw "GitHub surumu olusturulamadi" }
-Write-Host "Yayinlandi: https://github.com/unsalable/dpi-ui/releases/tag/$tag"
+Write-Host "Yayinlandi: https://github.com/$Repo/releases/tag/$tag"

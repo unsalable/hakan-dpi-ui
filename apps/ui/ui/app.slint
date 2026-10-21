@@ -23,8 +23,6 @@ export component AppWindow inherits Window {
     in-out property <int> depth: 0;
     /// Alt sayfa: 1 yontem, 2 dns, 3 siteler, 4 genel, 5 gorunum, 6 hakkinda.
     in-out property <int> sub: 0;
-    /// Alt sayfaya ana ekrandan dogrudan gelindiyse geri tusu ana ekrana doner.
-    in-out property <bool> sub-from-home: false;
 
     callback minimize();
     callback close-window();
@@ -43,39 +41,26 @@ export component AppWindow inherits Window {
     }
 
     function back() {
-        if (root.depth == 2 && root.sub-from-home) {
-            root.sub-from-home = false;
-            root.go(0, root.sub);
-        } else {
-            root.go(max(0, root.depth - 1), root.sub);
-        }
+        root.go(max(0, root.depth - 1), root.sub);
     }
 
     // Ayarlar menusu, dugmesinin oldugu sol taraftan gelir; ana ekran %30 saga kayar ve kararir.
     // Alt sayfalar iOS itme gecisiyle sagdan gelir; alttaki sayfa %30 sola kayar ve kararir.
+    // (Alt sayfalara yalnizca menuden gidilir: ana ekrandaki Yontem/DNS satirlari yerinde menu acar.)
     property <length> w: self.width;
-    property <bool> menu-shown: root.depth == 1 || (root.depth == 2 && !root.sub-from-home);
+    property <bool> menu-shown: root.depth >= 1;
 
     body := Rectangle {
         clip: true;
 
         home := HomePage {
-            x: root.depth == 0 ? 0px : root.menu-shown ? root.w * 0.3 : -root.w * 0.3;
+            x: root.depth == 0 ? 0px : root.w * 0.3;
             width: parent.width;
             height: parent.height;
             covered: root.depth == 0 ? 0 : 1;
             animate x, covered { duration: Motion.push; easing: Curves.push; }
             open-settings => {
-                root.sub-from-home = false;
                 root.go(1, root.sub);
-            }
-            open-method => {
-                root.sub-from-home = true;
-                root.go(2, 1);
-            }
-            open-dns => {
-                root.sub-from-home = true;
-                root.go(2, 2);
             }
         }
 
@@ -84,7 +69,7 @@ export component AppWindow inherits Window {
             x: !root.menu-shown ? -root.w : root.depth == 1 ? 0px : -root.w * 0.3;
             width: parent.width;
             height: parent.height;
-            covered: root.menu-shown && root.depth == 2 ? 1 : 0;
+            covered: root.depth == 2 ? 1 : 0;
             animate x, covered { duration: Motion.push; easing: Curves.push; }
             back => {
                 root.back();
@@ -98,7 +83,6 @@ export component AppWindow inherits Window {
             x: root.depth == 2 && root.sub == 1 ? 0px : root.w;
             width: parent.width;
             height: parent.height;
-            back-text: root.sub-from-home ? "" : @tr("Ayarlar");
             animate x { duration: Motion.push; easing: Curves.push; }
             back => {
                 root.back();
@@ -109,7 +93,6 @@ export component AppWindow inherits Window {
             x: root.depth == 2 && root.sub == 2 ? 0px : root.w;
             width: parent.width;
             height: parent.height;
-            back-text: root.sub-from-home ? "" : @tr("Ayarlar");
             animate x { duration: Motion.push; easing: Curves.push; }
             back => {
                 root.back();
