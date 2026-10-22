@@ -3,7 +3,7 @@
 
 import { Theme, Type, Metrics, Motion, Curves } from "tokens.slint";
 import { Icons } from "icons.slint";
-import { Icon, Tile, Switch, TextButton, BackButton } from "components.slint";
+import { Icon, Tile, Switch, TextButton, BackButton, CheckMark } from "components.slint";
 import { AppState, Choice } from "state.slint";
 
 /// Her ekranin zemini. Bos alanlara yapilan tiklamalari yutar (alttaki sayfaya gecmez);
@@ -276,53 +276,59 @@ export component ToggleRow inherits RowBase {
 export component CheckRow inherits RowBase {
     in property <string> title;
     in property <string> subtitle;
+    /// Basligin sagindaki kisa bilgi (orn. "Onerilen", sunucu adresi).
     in property <string> badge;
+    /// false iken alt satir yumusakca kapanir (yalnizca secili satirin aciklamasi icin).
+    in property <bool> subtitle-shown: true;
     in property <bool> selected;
     pad-v: 10px;
     accessible-role: list-item;
     accessible-label: root.title;
+    accessible-description: root.subtitle-shown ? root.subtitle : "";
     accessible-item-selected: root.selected;
 
     VerticalLayout {
         alignment: center;
         horizontal-stretch: 1;
-        spacing: 2px;
         HorizontalLayout {
             spacing: 8px;
-            alignment: start;
             Text {
                 text: root.title;
                 color: Theme.label;
                 font-size: Type.body;
                 overflow: elide;
+                horizontal-stretch: 1;
             }
 
             if root.badge != "": Text {
                 text: root.badge;
-                color: Theme.green;
-                font-size: Type.footnote;
-                font-weight: 600;
+                color: Theme.secondary;
+                font-size: Type.callout;
                 vertical-alignment: center;
             }
         }
 
-        if root.subtitle != "": Text {
-            text: root.subtitle;
-            color: Theme.secondary;
-            font-size: Type.footnote;
-            wrap: word-wrap;
+        if root.subtitle != "": Rectangle {
+            clip: true;
+            height: root.subtitle-shown ? sub.preferred-height + 2px : 0px;
+            animate height { duration: 280ms * Motion.scale; easing: Curves.out; }
+            sub := Text {
+                y: 2px;
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.subtitle;
+                color: Theme.secondary.with-alpha(root.subtitle-shown ? 1 : 0);
+                font-size: Type.footnote;
+                wrap: word-wrap;
+                animate color { duration: 220ms * Motion.scale; }
+            }
         }
     }
 
     VerticalLayout {
         alignment: center;
-        Icon {
-            commands: Icons.line-check;
-            width: 18px;
-            height: 18px;
-            weight: 2.4px;
-            tint: Theme.blue.with-alpha(root.selected ? 1 : 0);
-            animate tint { duration: Motion.fast; }
+        CheckMark {
+            on: root.selected;
         }
     }
 }
@@ -434,9 +440,28 @@ export component PickerRow inherits RowBase {
     property <length> menu-width: 230px;
 }
 
+/// Acilir menude bolum basligi (gruplu listedeki baslik gibi; oge metniyle ayni hizada).
+component MenuHeader inherits Rectangle {
+    in property <string> text;
+
+    Text {
+        x: 29px;
+        width: parent.width - 39px;
+        height: parent.height;
+        text: root.text;
+        color: Theme.secondary;
+        font-size: Type.footnote;
+        letter-spacing: 0.3px;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
 /// Simge karosu + baslik + secili deger; tiklayinca menu satirin ustunde, yerinde acilir
 /// (sayfa degismeden iki dokunusla secim). Uzun listeler menunun icinde kayar; acilista
-/// secili oge gorunur.
+/// secili oge gorunur. Secilen ogeye isaret cizilir, menu ardindan soner.
+/// Istege bagli iki bolum: ilk `split` oge `header` altinda, kalanlar ince bir cizgiden ve
+/// `more-header`dan sonra (basliklar bos olabilir; o zaman yalnizca cizgi).
 export component MenuRow inherits RowBase {
     in property <string> icon;
     in property <bool> filled: true;
@@ -445,6 +470,9 @@ export component MenuRow inherits RowBase {
     in property <string> value;
     in property <[Choice]> options;
     in property <int> current-index;
+    in property <int> split: 0;
+    in property <string> header;
+    in property <string> more-header;
     callback selected(int);
     inset: 58px;
     gap: 14px;
@@ -498,79 +526,129 @@ export component MenuRow inherits RowBase {
             x: -root.menu-width + 22px;
             y: -self.height - 4px;
             width: root.menu-width;
-            height: min(root.max-menu-height, root.options.length * root.item-height + 10px);
+            height: min(root.max-menu-height, root.content-height + 10px);
             close-policy: close-on-click-outside;
 
-            Rectangle {
+            panel := Rectangle {
+                /// Dokunulan oge: isaret servisin onayini beklemeden ona gecer, menu biraz sonra kapanir.
+                property <int> picked: -1;
+                property <int> marked: self.picked >= 0 ? self.picked : root.current-index;
+                // Acilista satirdan yukari kayarak belirir; secimden sonra isaret cizilirken soner.
                 property <bool> shown: false;
+                property <float> appear: self.shown ? 1 : 0;
+                animate appear { duration: 260ms * Motion.scale; easing: Curves.out; }
+                property <float> fade: self.picked >= 0 ? 0 : 1;
+                animate fade {
+                    delay: 180ms * Motion.scale;
+                    duration: 140ms * Motion.scale;
+                    easing: ease-in;
+                }
+                property <float> first-read;
                 init => {
+                    // Once kapali hali okunur: ilk okunusunda degisen deger animasyonsuz son haline
+                    // atlar ve menu bir anda belirirdi.
+                    self.first-read = self.appear;
                     self.shown = true;
                 }
                 width: 100%;
                 height: 100%;
-                y: self.shown ? 0 : 8px;
-                animate y { duration: 220ms * Motion.scale; easing: Curves.out; }
+                y: 8px * (1 - self.appear);
+                opacity: self.appear * self.fade;
                 background: Theme.elevated;
                 border-radius: 12px;
                 border-width: 1px;
                 border-color: Theme.elevated-stroke;
 
+                Timer {
+                    interval: max(1ms, 330ms * Motion.scale);
+                    running: panel.picked >= 0;
+                    triggered => {
+                        menu.close();
+                    }
+                }
+
                 // Kayan icerik kenardan 5 px iceride kirpilir (yuvarlak kosenin icinde kalir).
                 Flickable {
                     y: 5px;
                     height: parent.height - 10px;
-                    content-height: root.options.length * root.item-height;
+                    content-height: root.content-height;
                     init => {
-                        self.content-y = -clamp(root.current-index * root.item-height - (self.height - root.item-height) / 2, 0px, max(0px, self.content-height - self.height));
+                        self.content-y = -clamp(root.item-y(root.current-index) - (self.height - root.item-height) / 2, 0px, max(0px, self.content-height - self.height));
                     }
 
                     VerticalLayout {
                         padding-left: 5px;
                         padding-right: 5px;
-                        for option[index] in root.options: Rectangle {
-                            height: root.item-height;
-                            border-radius: 7px;
-                            background: item.has-hover ? Theme.fill.with-alpha(0.8) : transparent;
-                            accessible-role: list-item;
-                            accessible-label: option.title;
-                            accessible-item-selected: index == root.current-index;
-                            HorizontalLayout {
-                                padding-left: 8px;
-                                padding-right: 10px;
-                                spacing: 6px;
-                                VerticalLayout {
-                                    alignment: center;
-                                    Icon {
-                                        commands: Icons.line-check;
-                                        width: 15px;
-                                        height: 15px;
-                                        weight: 2.2px;
-                                        tint: Theme.label.with-alpha(index == root.current-index ? 1 : 0);
+                        for option[index] in root.options: VerticalLayout {
+                            if index == 0 && root.split > 0 && root.header != "": MenuHeader {
+                                height: root.header-height;
+                                text: root.header;
+                            }
+
+                            if index == root.split && index > 0: VerticalLayout {
+                                Rectangle {
+                                    height: root.separator-height;
+                                    Rectangle {
+                                        x: 8px;
+                                        y: (parent.height - self.height) / 2;
+                                        width: parent.width - 16px;
+                                        height: 1phx;
+                                        background: Theme.separator;
                                     }
                                 }
 
-                                Text {
-                                    text: option.title;
-                                    color: Theme.label;
-                                    font-size: Type.body;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
-                                    overflow: elide;
-                                }
-
-                                if option.badge != "": Text {
-                                    text: option.badge;
-                                    color: Theme.green;
-                                    font-size: Type.footnote;
-                                    font-weight: 600;
-                                    vertical-alignment: center;
+                                if root.more-header != "": MenuHeader {
+                                    height: root.header-height;
+                                    text: root.more-header;
                                 }
                             }
 
-                            item := TouchArea {
-                                clicked => {
-                                    root.selected(index);
-                                    menu.close();
+                            Rectangle {
+                                height: root.item-height;
+                                border-radius: 7px;
+                                background: item.has-hover || index == panel.picked ? Theme.fill.with-alpha(0.8) : Theme.fill.with-alpha(0);
+                                accessible-role: list-item;
+                                accessible-label: option.title;
+                                accessible-item-selected: index == panel.marked;
+                                HorizontalLayout {
+                                    padding-left: 7px;
+                                    padding-right: 10px;
+                                    spacing: 6px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        CheckMark {
+                                            on: index == panel.marked;
+                                            tint: Theme.label;
+                                            width: 16px;
+                                            height: 16px;
+                                        }
+                                    }
+
+                                    Text {
+                                        text: option.title;
+                                        color: Theme.label;
+                                        font-size: Type.body;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                    }
+
+                                    // Sagdaki kisa bilgi (orn. "Onerilen", sunucu adresi), listelerdeki gibi gri.
+                                    if option.badge != "": Text {
+                                        text: option.badge;
+                                        color: Theme.secondary;
+                                        font-size: Type.callout;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                item := TouchArea {
+                                    clicked => {
+                                        if (panel.picked < 0) {
+                                            panel.picked = index;
+                                            root.selected(index);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -582,8 +660,20 @@ export component MenuRow inherits RowBase {
 
     property <length> menu-width: 240px;
     property <length> item-height: 34px;
+    property <length> header-height: 26px;
+    property <length> separator-height: 9px;
     /// Yaklasik on bir bucuk oge: yarim gorunen son oge listenin kaydigini belli eder.
     property <length> max-menu-height: 400px;
+    property <length> first-height: root.split > 0 && root.header != "" ? root.header-height : 0px;
+    property <length> second-height: root.split > 0 && root.split < root.options.length
+        ? root.separator-height + (root.more-header != "" ? root.header-height : 0px)
+        : 0px;
+    property <length> content-height: root.options.length * root.item-height + root.first-height + root.second-height;
+
+    /// Bir ogenin icerikteki ust kenari (basliklar ve cizgi dahil).
+    pure function item-y(index: int) -> length {
+        index * root.item-height + root.first-height + (root.split > 0 && index >= root.split ? root.second-height : 0px)
+    }
 }
 
 /// Satir boyunca tek bir eylem (mavi ya da yikici kirmizi metin).

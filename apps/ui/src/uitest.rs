@@ -245,6 +245,135 @@ mod tests {
         (c, move || k.set(k.get() + 1))
     }
 
+    /// Yontem sayfasi: saglayicinin yontemleri ustte; digerleri kapali baslar, "daha goster"
+    /// satiri acar (kapaliyken altindaki gizli satirlar tiklanmaz), acilan satir dogru yontemi
+    /// secer; secili yontem oradaysa liste acik kalir.
+    #[test]
+    fn method_list_opens_and_selects() {
+        use slint::Model;
+        let mut h = Harness::new(1.0);
+        gallery::sample(&h, EngineState::Off);
+        crate::window::config_for_test(&h.app, |c| {
+            c.isp = "turktelekom".into();
+            c.method = "disorder".into();
+        });
+        let picked = Rc::new(Cell::new(-1));
+        let (p, weak) = (picked.clone(), h.app.as_weak());
+        h.state().on_select_method(move |i| {
+            p.set(i);
+            if let Some(app) = weak.upgrade() {
+                app.global::<AppState>().set_method_index(i);
+            }
+        });
+        assert_eq!((h.state().get_methods_main().row_count(), h.state().get_methods_more().row_count()), (4, 12));
+        assert_eq!(h.state().get_method_header(), "TÜRK TELEKOM İÇİN");
+        h.app.set_depth(2);
+        h.app.set_sub(1);
+        h.advance(600);
+        h.click(200.0, 451.0);
+        h.advance(500);
+        assert_eq!(picked.get(), -1, "daha goster satiri yontem secmemeli");
+        h.click(200.0, 450.0 + 44.0 * 2.0);
+        assert_eq!(picked.get(), 6, "acilan listenin ucuncu satiri (MD5 + TTL 3) secilmeli");
+        h.advance(500);
+        // Secim asagidaki listeye gecince ustteki aciklama kapanir; ikinci satir yukari kayar.
+        h.click(200.0, 217.0);
+        assert_eq!(picked.get(), 1, "ustteki ikinci satir (Sahte TTL 4) secilmeli");
+    }
+
+    /// Secim degisince isaret yeni satirda soldan saga cizilir (bir anda belirmez), eskisi kaybolur.
+    #[test]
+    fn check_mark_draws_in() {
+        let mut h = Harness::new(1.0);
+        gallery::sample(&h, EngineState::Off);
+        h.app.set_depth(2);
+        h.app.set_sub(2);
+        h.advance(600);
+        h.frame();
+        // DNS listesi: Cloudflare (satir merkezi y=190) secili; isaretin sag ucu (366, y-4).
+        let blue = |h: &mut Harness, y: f32| {
+            let (r, g, b) = h.pixel(366.0, y - 4.0);
+            b > 180 && r < 120 && g > 90
+        };
+        assert!(blue(&mut h, 190.0) && !blue(&mut h, 247.0));
+        h.state().set_dns_index(1);
+        let mut drawn_at = None;
+        for step in 0..30 {
+            h.advance(16);
+            h.frame();
+            if drawn_at.is_none() && blue(&mut h, 247.0) {
+                drawn_at = Some(step * 16 + 16);
+            }
+        }
+        let at = drawn_at.expect("yeni satirda isaret cizilmeli");
+        assert!(at >= 120, "isaret cizilerek gelmeli, {at} ms'de tamamlandi (aninda olmamali)");
+        assert!(!blue(&mut h, 190.0), "eski satirdaki isaret kaybolmali");
+    }
+
+    /// Gercek akis: dokunus ayari servise gonderir, ekran servisin onayladigi ayarla yenilenir.
+    /// Liste ayni kaldigi icin satirlar yeniden kurulmamali; isaret cizilerek gelmeli ve secili
+    /// yontemin aciklamasi yumusakca acilmali.
+    #[test]
+    fn selection_animates_after_service_confirms() {
+        let mut h = Harness::new(1.0);
+        gallery::sample(&h, EngineState::Off);
+        let confirm = |h: &Harness, provider: &str, method: &str| {
+            crate::window::config_for_test(&h.app, |c| {
+                c.isp = "turktelekom".into();
+                c.method = method.into();
+                c.dns.provider = provider.into();
+            });
+        };
+        confirm(&h, "cloudflare", "disorder");
+        h.app.set_depth(2);
+        h.app.set_sub(2);
+        h.advance(600);
+        h.frame();
+        let blue = |h: &mut Harness, y: f32| {
+            let (r, g, b) = h.pixel(366.0, y - 4.0);
+            b > 180 && r < 120 && g > 90
+        };
+        assert!(blue(&mut h, 190.0) && !blue(&mut h, 247.0));
+        confirm(&h, "google", "disorder");
+        let mut drawn_at = None;
+        for step in 0..30 {
+            h.advance(16);
+            h.frame();
+            if drawn_at.is_none() && blue(&mut h, 247.0) {
+                drawn_at = Some(step * 16 + 16);
+            }
+        }
+        let at = drawn_at.expect("yeni satirda isaret cizilmeli");
+        assert!(at >= 120, "servis onayindan sonra isaret cizilerek gelmeli, {at} ms'de tamamlandi");
+        assert!(!blue(&mut h, 190.0), "eski satirdaki isaret kaybolmali");
+
+        // Yontem: Ters sira (aciklamasi acik) -> Sahte TTL 4; Ters sira satiri bir anda degil
+        // yavasca kisalir (ikinci satirin ust kenari kademe kademe yukari kayar).
+        h.app.set_sub(1);
+        h.advance(600);
+        h.frame();
+        let row_top = |h: &mut Harness| -> f32 {
+            // Sahte TTL 4 satirinin basligi: y ekseninde ilk acik renkli nokta (x=40).
+            let mut y = 200.0;
+            while y < 300.0 {
+                let (r, _, _) = h.pixel(40.0, y);
+                if r > 150 {
+                    return y;
+                }
+                y += 1.0;
+            }
+            y
+        };
+        let before = row_top(&mut h);
+        confirm(&h, "google", "ttl4");
+        h.advance(64);
+        let mid = row_top(&mut h);
+        h.advance(600);
+        let after = row_top(&mut h);
+        assert!(after < before - 10.0, "aciklama kapaninca satir yukari kaymali ({before} -> {after})");
+        assert!(mid > after + 2.0 && mid < before - 1.0, "kayma yumusak olmali: {before} -> {mid} -> {after}");
+    }
+
     /// Alt sayfadaki bos bir yere tiklamak alttaki sayfaya (menu, ana ekran) gecmemeli.
     /// (Eski surumde "Tesekkurler" kartina tiklamak alttaki menuden "Genel"i aciyordu.)
     #[test]
@@ -344,18 +473,28 @@ mod tests {
         assert_eq!(h.page(), (0, 0));
         h.advance(400);
 
-        // Yontem: 16 hazir yontem, menu en fazla 400 px; secili (ilk) oge en ustte.
+        // Yontem: 16 hazir yontem, menu en fazla 400 px; secili (ilk) oge en ustte. Once
+        // saglayicinin 6 yontemi ("ONERILEN" altinda), sonra cizgi ve "DIGER YONTEMLER".
         assert!(h.state().get_methods().row_count() > 11, "uzun liste kaymali");
+        assert_eq!(h.state().get_methods_main().row_count(), 6);
+        let method_item = |i: usize| menu_item(METHOD_MENU_TOP, i, 6, true, true);
         h.click(200.0, 554.0);
         h.advance(400);
-        h.click(250.0, METHOD_MENU_TOP + 5.0 + 34.0 * 2.0 + 17.0);
+        h.click(250.0, method_item(2));
         assert_eq!(method.get(), 2, "ucuncu yontem secilmeli");
         assert_eq!(h.page(), (0, 0));
         // Menu kapandi: ilk ogenin yerine (ana ekranda bos alan) dokunmak bir sey secmez.
         method.set(-1);
         h.advance(400);
-        h.click(350.0, METHOD_MENU_TOP + 5.0 + 17.0);
+        h.click(350.0, method_item(0));
         assert_eq!(method.get(), -1, "menu secimden sonra kapanmali");
+
+        // Ikinci bolumun ilki (cizgi ve basligin altinda).
+        h.click(200.0, 554.0);
+        h.advance(400);
+        h.click(250.0, method_item(6));
+        assert_eq!(method.get(), 6, "diger yontemlerin ilki secilmeli");
+        h.advance(400);
 
         // Uzun listede asagi kaydirip sonuncuyu secmek.
         h.click(200.0, 554.0);
@@ -363,18 +502,20 @@ mod tests {
         h.scroll(250.0, 300.0, -800.0);
         h.click(250.0, 528.0 - 5.0 - 17.0);
         assert_eq!(method.get(), h.state().get_methods().row_count() as i32 - 1, "kaydirinca son yontem secilebilmeli");
+        // Isaret cizilirken menu kisa bir sure acik kalir; kapaninca DNS satiri dokunusu alir.
+        h.advance(400);
 
-        // DNS: ilk oge "Kapali", sonra sunucular.
+        // DNS: ilk oge "Kapali", ince cizgi, sonra sunucular.
         let rows = h.state().get_quick_dns().row_count() as f32;
-        let top = 576.0 - 4.0 - (rows * 34.0 + 10.0);
+        let top = 576.0 - 4.0 - (rows * 34.0 + 9.0 + 10.0);
         h.click(200.0, 598.0);
         h.advance(400);
-        h.click(250.0, top + 5.0 + 17.0);
+        h.click(250.0, menu_item(top, 0, 1, false, false));
         assert_eq!(dns.get(), 0, "'Kapali' secilmeli");
         h.advance(400);
         h.click(200.0, 598.0);
         h.advance(400);
-        h.click(250.0, top + 5.0 + 34.0 * 2.0 + 17.0);
+        h.click(250.0, menu_item(top, 2, 1, false, false));
         assert_eq!(dns.get(), 2);
 
         // Disari dokunmak secmeden kapatir.
@@ -392,6 +533,88 @@ mod tests {
     /// Yontem menusunun ust kenari: 16 yontemde menu en buyuk boyunda (400 px), alt kenari
     /// Yontem satirinin (y = 532) 4 px ustunde.
     const METHOD_MENU_TOP: f32 = 532.0 - 4.0 - 400.0;
+
+    /// Ust kenari `top` olan (kaymamis) menude `i`. ogenin ortasi. Ogeler 34 px; ilk `split` oge
+    /// basligin (26 px) altinda, kalanlar cizgiden (9 px) ve varsa ikinci basliktan sonra.
+    fn menu_item(top: f32, i: usize, split: usize, header: bool, more_header: bool) -> f32 {
+        let mut y = top + 5.0 + 34.0 * i as f32 + 17.0;
+        if split > 0 && header {
+            y += 26.0;
+        }
+        if split > 0 && i >= split {
+            y += 9.0 + if more_header { 26.0 } else { 0.0 };
+        }
+        y
+    }
+
+    /// Gercek pencere gibi ilerler: her 16 ms'de cizer (animasyonlar okunduklari anda baslar).
+    fn run(h: &mut Harness, ms: u64) {
+        let mut left = ms;
+        while left > 0 {
+            h.frame();
+            let step = left.min(16);
+            h.advance(step);
+            left -= step;
+        }
+        h.frame();
+    }
+
+    /// Ana ekran menusu bir anda belirmez, kayarak acilir. Secince isaret hemen (servisi
+    /// beklemeden) yeni ogede cizilmeye baslar, menu acik kalir; isaret yerine oturunca menu
+    /// soner ve kapanir.
+    #[test]
+    fn home_menu_marks_pick_then_fades() {
+        let mut h = Harness::new(1.0);
+        gallery::sample(&h, EngineState::Off);
+        let dns = Rc::new(Cell::new(-1));
+        let d = dns.clone();
+        h.state().on_select_quick_dns(move |i| d.set(i));
+        run(&mut h, 600);
+        // Menunun sag kenarina yakin bos bir nokta: arkasi siyah zemin, menu #2C2C2E.
+        let rows = h.state().get_quick_dns().row_count() as f32;
+        let top = 576.0 - 4.0 - (rows * 34.0 + 9.0 + 10.0);
+        let probe = (360.0, menu_item(top, 4, 1, false, false));
+        let menu_shade = |h: &mut Harness| h.pixel(probe.0, probe.1).0;
+        assert_eq!(menu_shade(&mut h), 0);
+
+        h.click(200.0, 598.0);
+        let opening = menu_shade(&mut h);
+        run(&mut h, 400);
+        let open = menu_shade(&mut h);
+        assert_eq!(open, 0x2C, "menu acilmali");
+        assert!(opening < open - 8, "menu solarak acilmali, ilk karede {opening:#x}");
+
+        // Secili: Cloudflare (1). Google'a (2) dokun: isaret onun satirinda cizilir.
+        let ink = |h: &mut Harness, i: usize| {
+            let y = menu_item(top, i, 1, false, false);
+            let mut best = 0;
+            for dy in -8..=8 {
+                for x in 148..170 {
+                    best = best.max(h.pixel(x as f32, y + dy as f32).0);
+                }
+            }
+            best
+        };
+        assert!(ink(&mut h, 1) > 200 && ink(&mut h, 2) < 120, "acilista isaret Cloudflare'de");
+        h.click(250.0, menu_item(top, 2, 1, false, false));
+        assert_eq!(dns.get(), 2, "secim hemen uygulanmali");
+        let first = ink(&mut h, 2);
+        run(&mut h, 150);
+        assert!(first < 200, "isaret bir anda belirmemeli ({first})");
+        assert!(ink(&mut h, 2) > 200, "isaret yeni ogede cizilmeli");
+        assert!(ink(&mut h, 1) < 120, "eski isaret kalkmali");
+        assert_eq!(menu_shade(&mut h), 0x2C, "isaret cizilirken menu acik kalir");
+        run(&mut h, 120);
+        let fading = menu_shade(&mut h);
+        assert!(fading > 0 && fading < 0x2C, "menu solarak kapanmali ({fading:#x})");
+        run(&mut h, 200);
+        assert_eq!(menu_shade(&mut h), 0, "menu kapanmali");
+
+        // Kapandiktan sonra eski yerine dokunmak bir sey secmez.
+        dns.set(-1);
+        h.click(250.0, menu_item(top, 3, 1, false, false));
+        assert_eq!(dns.get(), -1);
+    }
 
     /// Ayarlar ve geri dugmelerine hizli hizli basmak pencere suruklemeyi baslatmamali. Gecis
     /// sirasinda dugmeler kaydigi icin tiklamalar ust cubugun bos yerine denk gelir; suruklemede
@@ -594,33 +817,6 @@ mod gallery {
         crate::window::populate_for_test(&h.app, engine(state), learned);
     }
 
-    /// Baglanma animasyonu kare kare: kapali -> baglaniyor -> bagli -> kapali -> hata.
-    #[test]
-    fn connect_animation() {
-        let mut h = Harness::new(2.0);
-        sample(&h, EngineState::Off);
-        h.advance(600);
-        let (w, hh) = h.size();
-        let crop = (192, 256, 416, 432);
-        let grab = |h: &mut Harness, name: &str, steps: &[u64]| {
-            let mut frames = Vec::new();
-            for &ms in steps {
-                h.advance(ms);
-                frames.push(h.frame());
-            }
-            strip(name, &frames, w, hh, crop);
-        };
-        grab(&mut h, "anim-0-off", &[0]);
-        h.state().set_power(PowerState::Connecting);
-        grab(&mut h, "anim-1-connecting", &[0, 160, 160, 160, 160, 160, 160]);
-        h.state().set_power(PowerState::On);
-        grab(&mut h, "anim-2-on", &[0, 60, 60, 60, 80, 80, 100, 120, 200, 400]);
-        h.state().set_power(PowerState::Off);
-        grab(&mut h, "anim-3-off", &[0, 80, 80, 100, 120, 160, 400]);
-        h.state().set_power(PowerState::Error);
-        grab(&mut h, "anim-4-error", &[0, 50, 50, 50, 50, 50, 50, 80, 120, 400]);
-    }
-
     /// Ozel durumlar: bagli, hata, uyari seridi, bildirim, acilir menu, hiz testi.
     #[test]
     fn states() {
@@ -730,14 +926,29 @@ mod gallery {
         let (w, hh) = h.size();
         h.click(200.0, 554.0);
         let mut frames = Vec::new();
-        for _ in 0..6 {
-            frames.push(h.frame());
-            h.advance(40);
+        for i in 0..18 {
+            if i % 3 == 0 {
+                frames.push(h.frame());
+            }
+            h.frame();
+            h.advance(16);
         }
         strip("home-method-menu-open-2x", &frames, w, hh, (200, 200, 600, 1080));
         h.advance(300);
         let f = h.frame();
         strip("home-method-menu-2x", &[f], w, hh, (0, 200, 800, 1080));
+
+        // Ikinci yontemi sec: isaret cizilir, menu soner.
+        h.click(250.0, 128.0 + 5.0 + 26.0 + 34.0 + 17.0);
+        let mut frames = Vec::new();
+        for i in 0..27 {
+            if i % 3 == 0 {
+                frames.push(h.frame());
+            }
+            h.frame();
+            h.advance(16);
+        }
+        strip("home-method-menu-pick-2x", &frames, w, hh, (270, 240, 330, 200));
     }
 
     /// Simge ayrintilari icin 2x olcekte menu (ust kisim kirpilir).
@@ -800,6 +1011,102 @@ mod gallery {
         }
     }
 
+    /// Yontem ve DNS listeleri bastan sona (Turk Telekom; DNS sifreli ve yonlendirme kipinde).
+    #[test]
+    fn list_pages() {
+        use shared::config::DnsMode;
+        let mut h = Harness::new(1.0);
+        sample(&h, EngineState::Off);
+        crate::window::config_for_test(&h.app, |c| {
+            c.isp = "turktelekom".into();
+            c.method = "disorder".into();
+        });
+        h.app.set_depth(2);
+        h.app.set_sub(1);
+        h.advance(600);
+        h.shot("list-method-1");
+        h.scroll(200.0, 400.0, -480.0);
+        h.shot("list-method-2");
+        h.scroll(200.0, 400.0, -2000.0);
+        h.shot("list-method-3");
+        // Diger yontemleri ac (satir yukaridan asagi acilir), sonra birini sec.
+        h.scroll(200.0, 400.0, 3000.0);
+        let weak = h.app.as_weak();
+        h.state().on_select_method(move |i| {
+            if let Some(app) = weak.upgrade() {
+                app.global::<AppState>().set_method_index(i);
+            }
+        });
+        h.click(200.0, 451.0);
+        let (w, hh) = h.size();
+        let mut opening = Vec::new();
+        for i in 0..24 {
+            if i % 4 == 0 {
+                opening.push(h.frame());
+            }
+            h.frame();
+            h.advance(16);
+        }
+        strip("list-method-opening", &opening, w, hh, (0, 360, w, 280));
+        h.advance(200);
+        h.shot("list-method-open");
+        h.click(200.0, 247.0);
+        h.advance(110);
+        h.shot("list-method-switching");
+        h.advance(500);
+        h.shot("list-method-switched");
+        h.scroll(200.0, 400.0, -400.0);
+        h.shot("list-method-open-2");
+        h.set_dark(false);
+        h.advance(400);
+        h.shot("list-method-light");
+        h.set_dark(true);
+        h.scroll(200.0, 400.0, 3000.0);
+        for (mode, name) in [(DnsMode::Encrypted, "encrypted"), (DnsMode::Redirect, "redirect")] {
+            crate::window::config_for_test(&h.app, |c| {
+                c.isp = "turktelekom".into();
+                c.method = "disorder".into();
+                c.dns.mode = mode;
+            });
+            h.app.set_sub(2);
+            h.advance(600);
+            h.scroll(200.0, 400.0, 3000.0);
+            h.shot(&format!("list-dns-{name}-1"));
+            h.scroll(200.0, 400.0, -300.0);
+            h.shot(&format!("list-dns-{name}-2"));
+        }
+    }
+
+    /// Secim isareti kare kare (GDPI3_SHOTS): DNS satiri ve tema secimi, 2x.
+    #[test]
+    fn check_animation() {
+        let mut h = Harness::new(2.0);
+        sample(&h, EngineState::Off);
+        let (w, hh) = h.size();
+        let grab = |h: &mut Harness, name: &str, crop: (u32, u32, u32, u32)| {
+            let mut frames = vec![h.frame()];
+            for i in 1..=24 {
+                h.frame();
+                h.advance(16);
+                if i % 3 == 0 {
+                    frames.push(h.frame());
+                }
+            }
+            strip(name, &frames, w, hh, crop);
+        };
+        h.app.set_depth(2);
+        h.app.set_sub(2);
+        h.advance(600);
+        h.frame();
+        h.state().set_dns_index(1);
+        grab(&mut h, "check-dns", (560, 330, 240, 240));
+        h.app.set_sub(5);
+        h.advance(600);
+        h.frame();
+        h.state().set_theme_index(1);
+        grab(&mut h, "check-theme", (0, 440, 800, 140));
+    }
+
     /// Ingilizce ekranlar (elle calistirilir: surecin dilini degistirdigi icin diger testlerle
     /// ayni anda kosmamali). `GDPI3_SHOTS=<klasor> cargo test -p goodbyedpi3-ui english_pages -- --ignored`
     #[test]
@@ -811,6 +1118,11 @@ mod gallery {
         sample(&h, EngineState::On);
         h.advance(1500);
         h.shot("en-home");
+        h.click(200.0, 554.0);
+        h.advance(400);
+        h.shot("en-home-method-menu");
+        h.click(60.0, 26.0);
+        h.advance(400);
         h.app.set_depth(1);
         h.advance(600);
         h.shot("en-menu");
@@ -1004,15 +1316,16 @@ mod tray_menu {
         View { connected, state, method: "Ters sıra".into(), dns: "Cloudflare".into(), message: None }
     }
 
-    /// Satirlar dogru eylemlere gider; hizmet yoksa ilk satir hizmeti baslatir.
+    /// Ust bolum baglanir/keser (hizmet yoksa hizmeti baslatir), satirlar acar ve cikar.
     #[test]
     fn rows_map_to_actions() {
         let on = view(true, EngineState::On);
-        assert_eq!(traymenu::hit_for_test(130.0, 90.0), Some(0));
-        assert_eq!(traymenu::hit_for_test(130.0, 135.0), Some(1));
-        assert_eq!(traymenu::hit_for_test(130.0, 170.0), Some(2));
-        assert_eq!(traymenu::hit_for_test(130.0, 30.0), None, "ust bilgi alani tiklanmaz");
-        assert_eq!(traymenu::hit_for_test(130.0, 113.0), None, "ayirici tiklanmaz");
+        assert_eq!(traymenu::hit_for_test(40.0, 40.0), Some(0), "simge tiklanir");
+        assert_eq!(traymenu::hit_for_test(250.0, 40.0), Some(0), "anahtar tiklanir");
+        assert_eq!(traymenu::hit_for_test(130.0, 100.0), Some(1));
+        assert_eq!(traymenu::hit_for_test(130.0, 150.0), Some(2));
+        assert_eq!(traymenu::hit_for_test(130.0, 79.0), None, "bolumler arasi bosluk tiklanmaz");
+        assert_eq!(traymenu::hit_for_test(3.0, 100.0), None, "kenar tiklanmaz");
         assert_eq!(traymenu::action_for_test(0, &on), Action::Toggle);
         assert_eq!(traymenu::action_for_test(1, &on), Action::Open);
         assert_eq!(traymenu::action_for_test(2, &on), Action::Quit);
@@ -1055,5 +1368,258 @@ mod tray_menu {
             let name = format!("tray-menu-{}x.png", scale as u32);
             std::fs::write(std::path::Path::new(&dir).join(name), super::png(tw as u32, th as u32, &img)).unwrap();
         }
+    }
+
+    /// Simge gecisleri kare kare (GDPI3_SHOTS): kapali -> baglaniyor -> bagli, 2x, ust bolum.
+    #[test]
+    fn menu_transition_shots() {
+        let Some(dir) = std::env::var_os("GDPI3_SHOTS") else { return };
+        let (off, busy, on) = (view(true, EngineState::Off), view(true, EngineState::Starting), view(true, EngineState::On));
+        let mut frames = Vec::new();
+        let (mut fw, mut ch) = (0, 0);
+        let steps = [0.0f32, 0.15, 0.3, 0.5, 0.75, 1.0];
+        for (to, from, spin0) in [(&busy, &off, 0.0f32), (&on, &busy, 60.0)] {
+            for (k, &t) in steps.iter().enumerate() {
+                let (w, h, bgra) = traymenu::render_transition_for_test(to, from, t, spin0 + 25.0 * k as f32, true, 2.0);
+                (fw, ch) = (w, (h * 160 / 356).min(h));
+                frames.push(bgra.chunks_exact(4).take(w * ch).flat_map(|p| [p[2], p[1], p[0]]).collect::<Vec<u8>>());
+            }
+        }
+        let tw = fw * steps.len();
+        let th = ch * 2;
+        let mut img = vec![0u8; tw * th * 3];
+        for (k, f) in frames.iter().enumerate() {
+            let (cx, cy) = ((k % steps.len()) * fw, (k / steps.len()) * ch);
+            for y in 0..ch {
+                let d = ((cy + y) * tw + cx) * 3;
+                img[d..d + fw * 3].copy_from_slice(&f[y * fw * 3..(y + 1) * fw * 3]);
+            }
+        }
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(std::path::Path::new(&dir).join("tray-menu-transition.png"), super::png(tw as u32, th as u32, &img)).unwrap();
+    }
+}
+
+/// Baglanti simgesi: hareket, durus ve kare kare goruntu.
+#[cfg(test)]
+mod glyph {
+    use super::*;
+    use shared::ipc::EngineState;
+    use std::io::Write;
+
+    fn set(h: &Harness, power: PowerState, title: &str, sub: &str) {
+        h.state().set_power(power);
+        h.state().set_status_title(title.into());
+        h.state().set_status_sub(sub.into());
+    }
+
+    fn apply(h: &Harness, p: PowerState) {
+        match p {
+            PowerState::Off => set(h, p, "Kapalı", "Bağlanmak için dokun"),
+            PowerState::Connecting => set(h, p, "Bağlanıyor…", ""),
+            PowerState::On => set(h, p, "Korumalı", ""),
+            PowerState::Error => set(h, p, "Bağlanamadı", "Motor başlatılamadı. Yeniden denemek için dokun."),
+        }
+    }
+
+    fn harness(scale: f32) -> Harness {
+        let mut h = Harness::new(scale);
+        gallery::sample(&h, EngineState::Off);
+        run(&mut h, 600);
+        h
+    }
+
+    /// Gercek pencere gibi ilerler: her 16 ms'de (gerekiyorsa) cizer. Cizilmeden ilerleyen
+    /// zamanda durum gecislerinin baslangic ani kayar (Slint durumu ilk okundugunda degil,
+    /// bagimliligi degistiginde zamanlar; okunmamis eski bir isaret gecisi "bitmis" sayar).
+    fn run(h: &mut Harness, ms: u64) {
+        let mut left = ms;
+        while left > 0 {
+            h.frame();
+            let step = left.min(16);
+            h.advance(step);
+            left -= step;
+        }
+        h.frame();
+    }
+
+    /// Kareleri satir satir izgaraya dizer (uzun seritler okunmuyor).
+    fn grid(name: &str, frames: &[Vec<u8>], width: u32, height: u32, crop: (u32, u32, u32, u32), cols: usize) {
+        for (i, row) in frames.chunks(cols).enumerate() {
+            strip(&format!("{name}-{i}"), row, width, height, crop);
+        }
+    }
+
+    /// Simgenin en soldaki boyali noktasi (y satirinda, mantiksal px).
+    fn left_edge(h: &mut Harness, y: f32) -> f32 {
+        let mut x = 90.0;
+        while x < 200.0 {
+            let (r, g, b) = h.pixel(x, y);
+            if r.max(g).max(b) > 60 {
+                return x;
+            }
+            x += 0.5;
+        }
+        x
+    }
+
+    /// Baglanirken parcalar doner; animasyon bitince cizim durur (bosta islemci harcanmaz).
+    #[test]
+    fn glyph_moves_while_connecting_and_idles_after() {
+        let mut h = harness(1.0);
+        apply(&h, PowerState::Connecting);
+        run(&mut h, 800);
+        let a = h.frame();
+        run(&mut h, 120);
+        assert!(a != h.frame(), "baglanirken simge hareket etmeli");
+        for p in [PowerState::On, PowerState::Off] {
+            apply(&h, p);
+            run(&mut h, 1200);
+        }
+        run(&mut h, 2500);
+        let a = h.frame();
+        run(&mut h, 500);
+        assert!(a == h.frame(), "durgun ekran degismemeli");
+        assert!(!h.window.window().has_active_animations(), "animasyon kalmamali");
+    }
+
+    /// Kesilip donunce parantezler hep duz durur (parcalar koselerine oturur).
+    #[test]
+    fn glyph_brackets_land_square() {
+        let mut h = harness(1.0);
+        let rest = h.frame();
+        for wait in [700u64, 1333, 2100] {
+            apply(&h, PowerState::Connecting);
+            run(&mut h, wait);
+            apply(&h, PowerState::On);
+            run(&mut h, 1700);
+            apply(&h, PowerState::Off);
+            run(&mut h, 2500);
+            assert!(rest == h.frame(), "{wait} ms taramadan sonra simge ayni pozda durmali");
+            apply(&h, PowerState::Connecting);
+            run(&mut h, wait);
+            apply(&h, PowerState::Off);
+            run(&mut h, 2500);
+            assert!(rest == h.frame(), "{wait} ms sonra vazgecince simge ayni pozda durmali");
+        }
+    }
+
+    /// Uzerine gelince simge buyur, basinca kuculur.
+    #[test]
+    fn glyph_hover_and_press() {
+        let mut h = harness(2.0);
+        h.window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(330.0, 120.0) });
+        run(&mut h, 500);
+        let rest = left_edge(&mut h, 258.0);
+        h.window.dispatch_event(WindowEvent::PointerMoved { position: LogicalPosition::new(200.0, 258.0) });
+        run(&mut h, 500);
+        let hover = left_edge(&mut h, 258.0);
+        h.window.dispatch_event(WindowEvent::PointerPressed { position: LogicalPosition::new(200.0, 258.0), button: PointerEventButton::Left });
+        run(&mut h, 500);
+        let press = left_edge(&mut h, 258.0);
+        assert!(hover < rest - 1.0, "uzerine gelince buyumeli ({rest} -> {hover})");
+        assert!(press > rest + 1.0, "basinca kuculmeli ({rest} -> {press})");
+    }
+
+    /// Kare kare izgara (GDPI3_SHOTS): baglaniyor -> bagli -> kapali -> hata.
+    #[test]
+    fn connect_animation() {
+        let mut h = harness(2.0);
+        let (w, hh) = h.size();
+        let crop = (192, 300, 416, 432);
+        let grab = |h: &mut Harness, name: &str, steps: &[u64]| {
+            let mut frames = Vec::new();
+            for &ms in steps {
+                run(h, ms);
+                frames.push(h.frame());
+            }
+            grid(&format!("anim-{name}"), &frames, w, hh, crop, 6);
+        };
+        apply(&h, PowerState::Connecting);
+        grab(&mut h, "1-connecting", &[0, 40, 40, 40, 40, 60, 60, 80, 100, 150, 200, 300]);
+        apply(&h, PowerState::On);
+        grab(&mut h, "2-on", &[0, 50, 50, 50, 50, 50, 60, 60, 80, 100, 150, 400]);
+        apply(&h, PowerState::Off);
+        grab(&mut h, "3-off", &[0, 50, 50, 60, 60, 80, 100, 120, 160, 200, 300, 600]);
+        apply(&h, PowerState::Connecting);
+        run(&mut h, 900);
+        apply(&h, PowerState::Error);
+        grab(&mut h, "4-error", &[0, 60, 60, 60, 60, 80, 80, 100, 120, 160, 200, 500]);
+    }
+
+    #[derive(Clone, Copy)]
+    enum Ev {
+        Hover(bool),
+        Press,
+        Release(PowerState),
+        Set(PowerState),
+    }
+
+    /// 60 kare/sn ham kareler (GDPI3_FRAMES=<klasor>): <klasor>/connect.raw (RGB, simge ve
+    /// yazilar, 2x) + connect.json. Animasyonu video olarak incelemek icin; kare basina cizim
+    /// suresini de yazar. `cargo test -p goodbyedpi3-ui connect_video -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn connect_video() {
+        let Some(dir) = std::env::var_os("GDPI3_FRAMES") else { return };
+        let dir = std::path::PathBuf::from(dir);
+        let mut h = harness(2.0);
+        let (w, _) = h.size();
+        // Mantiksal 40..360 x 130..460.
+        let (cx, cy, cw, ch) = (80u32, 260u32, 640u32, 660u32);
+        let script: &[(u64, Ev)] = &[
+            (250, Ev::Hover(true)),
+            (600, Ev::Press),
+            (700, Ev::Release(PowerState::Connecting)),
+            (2100, Ev::Set(PowerState::On)),
+            (3500, Ev::Hover(false)),
+            (4100, Ev::Hover(true)),
+            (4400, Ev::Press),
+            (4500, Ev::Release(PowerState::Off)),
+            (5500, Ev::Press),
+            (5600, Ev::Release(PowerState::Connecting)),
+            (6700, Ev::Set(PowerState::Error)),
+            (7900, Ev::Hover(false)),
+            (8500, Ev::Set(PowerState::Off)),
+        ];
+        let end = 9300u64;
+        let _ = std::fs::create_dir_all(&dir);
+        let mut out = std::io::BufWriter::new(std::fs::File::create(dir.join("connect.raw")).unwrap());
+        let center = LogicalPosition::new(200.0, 258.0);
+        let away = LogicalPosition::new(330.0, 120.0);
+        h.window.dispatch_event(WindowEvent::PointerMoved { position: away });
+        let (mut next, mut count, mut t_ms) = (0usize, 0u32, 0f64);
+        let mut costs = Vec::new();
+        while (t_ms as u64) < end {
+            while next < script.len() && script[next].0 <= t_ms as u64 {
+                match script[next].1 {
+                    Ev::Hover(on) => h.window.dispatch_event(WindowEvent::PointerMoved { position: if on { center } else { away } }),
+                    Ev::Press => h.window.dispatch_event(WindowEvent::PointerPressed { position: center, button: PointerEventButton::Left }),
+                    Ev::Release(p) => {
+                        h.window.dispatch_event(WindowEvent::PointerReleased { position: center, button: PointerEventButton::Left });
+                        apply(&h, p);
+                    }
+                    Ev::Set(p) => apply(&h, p),
+                }
+                next += 1;
+            }
+            let started = std::time::Instant::now();
+            let f = h.frame();
+            costs.push(started.elapsed().as_secs_f64() * 1000.0);
+            for y in cy..cy + ch {
+                let start = ((y * w + cx) * 3) as usize;
+                out.write_all(&f[start..start + (cw * 3) as usize]).unwrap();
+            }
+            count += 1;
+            let before = t_ms as u64;
+            t_ms += 1000.0 / 60.0;
+            h.advance(t_ms as u64 - before);
+        }
+        out.flush().unwrap();
+        costs.sort_by(|a, b| a.total_cmp(b));
+        let avg = costs.iter().sum::<f64>() / costs.len() as f64;
+        eprintln!("kare basina cizim ort {avg:.2} ms, %95 {:.2} ms, en kotu {:.2} ms (2x, tum pencere)", costs[costs.len() * 95 / 100], costs[costs.len() - 1]);
+        let meta = format!("{{\"width\": {cw}, \"height\": {ch}, \"frames\": {count}, \"fps\": 60}}");
+        std::fs::write(dir.join("connect.json"), meta).unwrap();
     }
 }

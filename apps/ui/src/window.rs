@@ -13,7 +13,7 @@ use shared::t;
 use shared::update::{UpdateState, UpdateStatus};
 use shared::ipc::{EngineState, EngineStatus, Event, LearnedHost, Request, Response, StateSnapshot};
 use slint::winit_030::{WinitWindowAccessor, winit};
-use slint::{ComponentHandle, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 
 use crate::client::{Client, Incoming};
 use crate::prefs::{self, Prefs};
@@ -74,8 +74,38 @@ fn s(v: impl Into<SharedString>) -> SharedString {
     v.into()
 }
 
+/// Bolum basligi icin buyuk harf; Turkcede i -> İ, ı -> I.
+fn upper(text: &str, en: bool) -> String {
+    if en {
+        return text.to_uppercase();
+    }
+    text.chars()
+        .flat_map(|c| match c {
+            'i' => "İ".chars().collect::<Vec<_>>(),
+            'ı' => vec!['I'],
+            c => c.to_uppercase().collect(),
+        })
+        .collect()
+}
+
 fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
     ModelRc::new(VecModel::from(items))
+}
+
+/// Listeyi yerinde gunceller: satir sayisi ayniysa yalnizca degisen satirlar yazilir, model
+/// degismez. Servis her ayar degisikliginde tum ayari yeniden gonderir; model her seferinde
+/// degisseydi satirlar bastan kurulur, secim isareti, aciklama ve anahtar gibi animasyonlar
+/// calismadan son haline atlardi.
+fn update<T: Clone + PartialEq + 'static>(current: ModelRc<T>, items: Vec<T>, set: impl FnOnce(ModelRc<T>)) {
+    if current.row_count() != items.len() {
+        set(model(items));
+        return;
+    }
+    for (i, item) in items.into_iter().enumerate() {
+        if current.row_data(i).as_ref() != Some(&item) {
+            current.set_row_data(i, item);
+        }
+    }
 }
 
 /// IPC is parcacigindan arayuze bildirim gonderir.
@@ -333,27 +363,29 @@ impl Ctx {
             .map(|i| Choice { id: s(i.id), title: s(i.label(en)), subtitle: s(i.about(en)), badge: s("") })
             .collect();
         let isp_index = presets::ISPS.iter().position(|i| i.id.eq_ignore_ascii_case(&cfg.isp)).unwrap_or(0);
-        st.set_isp_names(model(isps.iter().map(|c| c.title.clone()).collect()));
-        st.set_isps(model(isps));
+        update(st.get_isp_names(), isps.iter().map(|c| c.title.clone()).collect(), |m| st.set_isp_names(m));
+        update(st.get_isps(), isps, |m| st.set_isps(m));
         st.set_isp_index(isp_index as i32);
 
-        // Yontemler: secili saglayicinin onerileri basta, sonra digerleri, sonra ozeller.
+        // Yontemler: secili saglayicinin onerileri (ayri bolum), sonra digerleri, sonra ozeller.
+        // Alt satir yontemin ne yaptigini anlatir; ekranda yalnizca secili satirda gorunur.
         let isp = &presets::ISPS[isp_index];
         let mut ids: Vec<String> = Vec::new();
-        let mut items: Vec<Choice> = Vec::new();
+        let mut main: Vec<Choice> = Vec::new();
+        let mut more: Vec<Choice> = Vec::new();
         for (n, id) in isp.methods.iter().enumerate() {
             if let Some(m) = presets::method(id) {
                 let badge = if n == 0 { t!("Önerilen", "Recommended") } else { String::new() };
-                items.push(Choice { id: s(m.id), title: s(m.label(en)), subtitle: s(m.config().short_summary(en)), badge: s(badge) });
+                main.push(Choice { id: s(m.id), title: s(m.label(en)), subtitle: s(m.about(en)), badge: s(badge) });
                 ids.push(m.id.into());
             }
         }
         for m in presets::ALL.iter().filter(|m| !isp.methods.contains(&m.id)) {
-            items.push(Choice { id: s(m.id), title: s(m.label(en)), subtitle: s(m.config().short_summary(en)), badge: s("") });
+            more.push(Choice { id: s(m.id), title: s(m.label(en)), subtitle: s(m.about(en)), badge: s("") });
             ids.push(m.id.into());
         }
         for c in &cfg.custom_methods {
-            items.push(Choice {
+            more.push(Choice {
                 id: s(c.id.as_str()),
                 title: s(t!("Özel · {}", "Custom · {}", c.name)),
                 subtitle: s(c.config.short_summary(en)),
@@ -362,7 +394,15 @@ impl Ctx {
             ids.push(c.id.clone());
         }
         let method_index = ids.iter().position(|i| i.eq_ignore_ascii_case(&cfg.method)).unwrap_or(0);
-        st.set_methods(model(items));
+        let header = if isp.id == "general" {
+            t!("ÖNERİLEN", "RECOMMENDED")
+        } else {
+            upper(&t!("{} için", "For {}", isp.label(en)), en)
+        };
+        update(st.get_methods(), main.iter().chain(more.iter()).cloned().collect(), |m| st.set_methods(m));
+        update(st.get_methods_main(), main, |m| st.set_methods_main(m));
+        update(st.get_methods_more(), more, |m| st.set_methods_more(m));
+        st.set_method_header(s(header));
         st.set_method_index(method_index as i32);
         *self.method_ids.borrow_mut() = ids;
 
@@ -374,27 +414,26 @@ impl Ctx {
         });
         let (dns_ids, providers) = dns_choices(&cfg, cfg.dns.mode, en);
         let dns_index = dns_ids.iter().position(|i| i.eq_ignore_ascii_case(&cfg.dns.provider)).map_or(-1, |i| i as i32);
-        st.set_dns_providers(model(providers));
+        update(st.get_dns_providers(), providers, |m| st.set_dns_providers(m));
         st.set_dns_index(dns_index);
         *self.dns_ids.borrow_mut() = dns_ids;
         let (quick_ids, quick, quick_index) = quick_dns(&cfg, en);
-        st.set_quick_dns(model(quick));
+        update(st.get_quick_dns(), quick, |m| st.set_quick_dns(m));
         st.set_quick_dns_index(quick_index);
         *self.quick_dns_ids.borrow_mut() = quick_ids;
-        st.set_custom_dns(model(
-            cfg.dns
-                .custom
-                .iter()
-                .map(|c| HostItem { key: s(c.id.as_str()), name: s(c.name.as_str()), note: s(custom_dns_address(c)) })
-                .collect(),
-        ));
+        update(
+            st.get_custom_dns(),
+            cfg.dns.custom.iter().map(|c| HostItem { key: s(c.id.as_str()), name: s(c.name.as_str()), note: s(custom_dns_address(c)) }).collect(),
+            |m| st.set_custom_dns(m),
+        );
         st.set_dns_fallback(cfg.dns.fallback_to_system);
         st.set_dns_skip_vpn(cfg.dns.skip_on_vpn);
 
         // Siteler.
         st.set_scope_mode(if cfg.scope.mode == engine::ScopeMode::Smart { 0 } else { 1 });
         st.set_learning(cfg.scope.learning);
-        st.set_categories(model(
+        update(
+            st.get_categories(),
             engine::scope::BUILTIN_TARGETS
                 .iter()
                 .map(|(id, _)| CategoryItem {
@@ -403,9 +442,10 @@ impl Ctx {
                     checked: cfg.scope.categories.iter().any(|c| c.eq_ignore_ascii_case(id)),
                 })
                 .collect(),
-        ));
-        st.set_targets(model(host_items(&cfg.scope.targets)));
-        st.set_excluded(model(host_items(&cfg.scope.excluded)));
+            |m| st.set_categories(m),
+        );
+        update(st.get_targets(), host_items(&cfg.scope.targets), |m| st.set_targets(m));
+        update(st.get_excluded(), host_items(&cfg.scope.excluded), |m| st.set_excluded(m));
 
         // Genel.
         st.set_start_with_windows(cfg.start_with_windows);
@@ -426,7 +466,8 @@ impl Ctx {
             .rev()
             .map(|h| HostItem { key: s(h.host.as_str()), name: s(h.host.as_str()), note: s(learn_reason(&h.reason)) })
             .collect();
-        app.global::<AppState>().set_learned(model(items));
+        let st = app.global::<AppState>();
+        update(st.get_learned(), items, |m| st.set_learned(m));
     }
 
     /// Dili uygular: Slint ekranlari (`@tr`) ve Rust'in urettigi metinler birlikte degisir.
@@ -687,14 +728,13 @@ fn dns_choices(cfg: &AppConfig, mode: DnsMode, en: bool) -> (Vec<String>, Vec<Ch
             DnsMode::Off => false,
         };
         if fits {
-            let detail = match mode {
-                DnsMode::Redirect => {
-                    let (a, port) = p.udp_v4.unwrap_or(("", 53));
-                    format!("{} · {a}:{port}", p.about(en))
-                }
-                _ => format!("{} · {}", p.about(en), if p.doh_url.starts_with("tls://") { "DoT" } else { "DoH" }),
+            // Yonlendirmede adres (53 disindaki port onemli) satirin saginda durur.
+            let address = match (mode, p.udp_v4) {
+                (DnsMode::Redirect, Some((a, 53))) => a.to_owned(),
+                (DnsMode::Redirect, Some((a, port))) => format!("{a}:{port}"),
+                _ => String::new(),
             };
-            items.push(Choice { id: s(p.id), title: s(p.label(en)), subtitle: s(detail), badge: s("") });
+            items.push(Choice { id: s(p.id), title: s(p.label(en)), subtitle: s(p.about(en)), badge: s(address) });
             ids.push(p.id.to_owned());
         }
     }
@@ -1225,6 +1265,15 @@ pub(crate) fn populate_for_test(app: &AppWindow, engine: EngineStatus, learned: 
     ctx.apply_learned();
     ctx.apply_engine();
     app.global::<AppState>().set_version(s(shared::VERSION));
+}
+
+/// Arayuz testleri: ayari degistirip ekrana uygular (orn. saglayici, DNS kipi).
+#[cfg(test)]
+pub(crate) fn config_for_test(app: &AppWindow, f: impl FnOnce(&mut AppConfig)) {
+    let ctx = Ctx::new(app, Prefs::default(), true);
+    let mut cfg = AppConfig::default().sanitized();
+    f(&mut cfg);
+    ctx.apply_config(cfg);
 }
 
 #[cfg(test)]

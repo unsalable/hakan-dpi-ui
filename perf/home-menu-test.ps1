@@ -137,6 +137,30 @@ try {
         return $bmp
     }
     function Px($bmp, [double] $x, [double] $y) { return $bmp.GetPixel([int]($x * $s), [int]($y * $s)) }
+    # Dosyaya yazmadan hizli goruntu: (x, y) noktasinin kirmizi degeri (koyu temada gri tonu).
+    function Red([double] $x, [double] $y) {
+        $r = New-Object MenuW32+RECT; [void][MenuW32]::GetWindowRect($h, [ref]$r)
+        $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)
+        $g = [System.Drawing.Graphics]::FromImage($bmp); $hdc = $g.GetHdc()
+        [void][MenuW32]::PrintWindow($h, $hdc, 2)
+        $g.ReleaseHdc($hdc); $g.Dispose()
+        $v = $bmp.GetPixel([int]($x * $s), [int]($y * $s)).R
+        $bmp.Dispose()
+        return $v
+    }
+    # Tikladiktan sonra `ms` boyunca bir noktanin degerleri (animasyonun ara kareleri).
+    function Watch([double] $x, [double] $y, [int] $ms) {
+        $sw = [Diagnostics.Stopwatch]::StartNew(); $vals = @()
+        while ($sw.ElapsedMilliseconds -lt $ms) { $vals += (Red $x $y) }
+        return $vals
+    }
+    # Mesajlari gonderir ama beklemez (animasyonu izlemek icin).
+    function Press([double] $x, [double] $y) {
+        $l = [IntPtr](([int]($y * $s) -shl 16) -bor [int]($x * $s))
+        [void][MenuW32]::PostMessage($h, 0x0200, [IntPtr]::Zero, $l)
+        [void][MenuW32]::PostMessage($h, 0x0201, [IntPtr]1, $l)
+        [void][MenuW32]::PostMessage($h, 0x0202, [IntPtr]::Zero, $l)
+    }
     function Same($a, $b) { return [Math]::Abs($a.R - $b.R) + [Math]::Abs($a.G - $b.G) + [Math]::Abs($a.B - $b.B) -lt 12 }
 
     $windows = [MenuW32]::VisibleWindows([uint32]$p.Id)
@@ -146,14 +170,28 @@ try {
     $free = Px $homeShot 60 150
 
     Write-Host "Yontem menusu"
-    Click 200 554
+    # Acilis: menu bir anda belirmez; zemin rengi kareler boyunca kademe kademe menu rengine gecer.
+    $bg0 = (Px $homeShot 300 150).R
+    Press 200 554
+    $vals = Watch 300 150 400
+    $final = $vals[-1]
+    $mid = @($vals | Where-Object { $_ -gt $bg0 + 3 -and $_ -lt $final - 3 }).Count
+    Write-Host "    acilis kareleri: $($vals -join ',')"
+    Check "menu solarak acildi ($mid ara kare)" ($mid -ge 1 -and $final -gt $bg0 + 20)
+    Start-Sleep -Milliseconds 200
     $open = Shot "home-menu-1-method"
     Check "menu acildi (bos zemin menuyle kaplandi)" (-not (Same (Px $open 300 150) $bg))
     Check "menu disindaki yer degismedi" (Same (Px $open 60 150) $free)
     Check "menu ayri pencere degil" ([MenuW32]::VisibleWindows([uint32]$p.Id) -eq $windows)
     Check "menu acilinca ayar gonderilmedi" ($svc.ConfigCount() -eq 0)
-    # Ucuncu oge: Genel saglayicinin ucuncu onerisi "Ters sira" (disorder).
-    Click 250 218
+    # Ucuncu oge: Genel saglayicinin ucuncu onerisi "Ters sira" (disorder). Menu y 128'de;
+    # once "ONERILEN" basligi (26 px), ogeler 34 px.
+    Press 250 244
+    # Secince isaret cizilirken menu acik kalir, sonra soner (bir anda kaybolmaz).
+    $vals = Watch 300 150 500
+    $mid = @($vals | Where-Object { $_ -gt $bg0 + 3 -and $_ -lt $final - 3 }).Count
+    Write-Host "    kapanis kareleri: $($vals -join ',')"
+    Check "secimden sonra menu solarak kapandi ($mid ara kare)" ($mid -ge 1 -and $vals[0] -ge $final - 3 -and $vals[-1] -le $bg0 + 3)
     for ($i = 0; $i -lt 20 -and $svc.ConfigCount() -lt 1; $i++) { Start-Sleep -Milliseconds 100 }
     Check "secim tek istekle gitti" ($svc.ConfigCount() -eq 1)
     if ($svc.ConfigCount() -ge 1) { Check "yontem Ters sira (disorder)" ($svc.Config(0) -match '"method":"disorder"') }
@@ -163,9 +201,9 @@ try {
     Write-Host "DNS menusu"
     Click 200 598
     $dns = Shot "home-menu-3-dns"
-    # DNS menusu 9 oge: y 256-572; ilk oge "Kapali".
+    # DNS menusu 9 oge ve "Kapali"dan sonra ince cizgi (9 px): y 247-572; ilk oge "Kapali".
     Check "DNS menusu acildi" (-not (Same (Px $dns 300 300) (Px $homeShot 300 300)))
-    Click 250 278
+    Click 250 269
     for ($i = 0; $i -lt 20 -and $svc.ConfigCount() -lt 2; $i++) { Start-Sleep -Milliseconds 100 }
     Check "DNS secimi tek istekle gitti" ($svc.ConfigCount() -eq 2)
     if ($svc.ConfigCount() -ge 2) { Check "DNS kapatildi" ($svc.Config(1) -match '"dns":\{"mode":"off"') }
